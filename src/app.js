@@ -15,7 +15,7 @@ const rateLimit = require("express-rate-limit");
 const authRoutes = require("./routes/auth.routes");
 const healthRoutes = require("./routes/health.routes");
 const categoryRoutes = require("./routes/category.routes"); // ← ADD THIS
-const productRoutes = require('./routes/product.routes'); 
+const productRoutes = require("./routes/product.routes");
 
 // Initialize Express application
 const app = express();
@@ -46,7 +46,7 @@ app.use(
     origin:
       process.env.NODE_ENV === "production"
         ? process.env.ALLOWED_ORIGINS?.split(",")
-        : "*",
+        : ["http://localhost:3000", "http://localhost:3001", "https://gamersbd-frontend.vercel.app/"], // Explicit origins for dev
     credentials: true,
     optionsSuccessStatus: 200,
   }),
@@ -156,8 +156,8 @@ app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
 
 // Product routes
-app.use('/api/products', productRoutes);
-app.use('/api/categories', categoryRoutes);  // This line MUST be here
+app.use("/api/products", productRoutes);
+app.use("/api/categories", categoryRoutes); // This line MUST be here
 
 /**
  * ====================================
