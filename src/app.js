@@ -1,8 +1,32 @@
-/**
- * Express Application Configuration
- * Main entry point for the REST API server
- * @module app
- */
+
+// Load environment variables FIRST - before anything else
+const dotenv = require("dotenv");
+const path = require("path");
+
+// Load env vars from .env file
+const result = dotenv.config();
+dotenv.config();
+
+// Debug - remove this after confirming it works
+console.log('🔍 Environment check:');
+console.log('✅ JWT_SECRET exists:', !!process.env.JWT_SECRET);
+console.log('✅ MONGO_URI exists:', !!process.env.MONGO_URI);
+console.log('✅ PORT:', process.env.PORT);
+
+if (result.error) {
+  console.error("⚠️  Error loading .env file:", result.error.message);
+  console.log("Make sure you have a .env file in the root directory");
+} else {
+  console.log("✅ Environment variables loaded successfully");
+}
+
+// Debug: Check if JWT_SECRET is loaded (without exposing the value)
+console.log(
+  "🔑 JWT_SECRET status:",
+  process.env.JWT_SECRET ? "✅ Present" : "❌ MISSING",
+);
+console.log("🌍 NODE_ENV:", process.env.NODE_ENV || "development");
+console.log("🚪 PORT:", process.env.PORT || "5000 (default)");
 
 const express = require("express");
 const cors = require("cors");
@@ -14,10 +38,9 @@ const rateLimit = require("express-rate-limit");
 // Route imports
 const authRoutes = require("./routes/auth.routes");
 const healthRoutes = require("./routes/health.routes");
-const categoryRoutes = require("./routes/category.routes"); // ← ADD THIS
+const categoryRoutes = require("./routes/category.routes");
 const productRoutes = require("./routes/product.routes");
-const userRoutes = require('./routes/user.routes');
-
+const userRoutes = require("./routes/user.routes");
 
 // Initialize Express application
 const app = express();
@@ -43,9 +66,6 @@ app.use(
 );
 
 // CORS configuration
-// In your main server file (app.js or server.js), update the CORS configuration:
-
-// CORS configuration - Make sure this is BEFORE your routes
 const corsOptions = {
   origin: function (origin, callback) {
     const allowedOrigins = [
@@ -54,7 +74,6 @@ const corsOptions = {
       "http://localhost:5173",
       "https://gamersbd-frontend.vercel.app",
       "https://gamers-bd-admin.vercel.app",
-      // Add your Render.com backend URL if needed
       "https://gamersbd-server.onrender.com",
     ];
 
@@ -118,7 +137,6 @@ app.use("/api", limiter);
  * ====================================
  * Root Endpoint - API Information
  * ====================================
- * Shows API status and available endpoints
  */
 app.get("/", (req, res) => {
   const baseUrl = `${req.protocol}://${req.get("host")}`;
@@ -163,7 +181,6 @@ app.get("/", (req, res) => {
         delete: "/api/products/:id - Delete product",
       },
       categories: {
-        // ← ADD THIS
         get: "/api/categories - Get all categories",
         post: "/api/categories - Create new category (admin)",
       },
@@ -184,7 +201,7 @@ app.get("/", (req, res) => {
  * ====================================
  */
 
-// Health check endpoint - detailed system status
+// Health check endpoint
 app.use("/api/health", healthRoutes);
 
 // Authentication routes
@@ -192,8 +209,8 @@ app.use("/api/auth", authRoutes);
 
 // Product routes
 app.use("/api/products", productRoutes);
-app.use("/api/categories", categoryRoutes); // This line MUST be here
-app.use('/api/users', userRoutes);
+app.use("/api/categories", categoryRoutes);
+app.use("/api/users", userRoutes);
 
 /**
  * ====================================
