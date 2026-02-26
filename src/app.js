@@ -1,5 +1,3 @@
-
-// Load environment variables FIRST - before anything else
 const dotenv = require("dotenv");
 const path = require("path");
 
