@@ -6,10 +6,10 @@ const result = dotenv.config();
 dotenv.config();
 
 // Debug - remove this after confirming it works
-console.log('🔍 Environment check:');
-console.log('✅ JWT_SECRET exists:', !!process.env.JWT_SECRET);
-console.log('✅ MONGO_URI exists:', !!process.env.MONGO_URI);
-console.log('✅ PORT:', process.env.PORT);
+console.log("🔍 Environment check:");
+console.log("✅ JWT_SECRET exists:", !!process.env.JWT_SECRET);
+console.log("✅ MONGO_URI exists:", !!process.env.MONGO_URI);
+console.log("✅ PORT:", process.env.PORT);
 
 if (result.error) {
   console.error("⚠️  Error loading .env file:", result.error.message);
@@ -209,7 +209,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/users", userRoutes);
-
+// Routes
+app.use("/api/auth", authRoutes);
 /**
  * ====================================
  * API Root - List all available API endpoints
