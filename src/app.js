@@ -41,10 +41,10 @@ const productRoutes = require("./routes/product.routes");
 const userRoutes = require("./routes/user.routes");
 const brandRoutes = require("./routes/brand.routes");
 const cartRoutes = require("./routes/cart.routes");
-// Uncomment these when you create them
-// const orderRoutes = require("./routes/order.routes");
-// const reviewRoutes = require("./routes/review.routes");
-// const wishlistRoutes = require("./routes/wishlist.routes");
+const orderRoutes = require("./routes/order.routes");
+const wishlistRoutes = require("./routes/wishlist.routes");
+const compareRoutes = require("./routes/compare.routes");
+const emailRoutes = require("./routes/email.routes");
 
 // Initialize Express application
 const app = express();
@@ -162,8 +162,10 @@ app.get("/", (req, res) => {
       categories: `${baseUrl}/api/categories`,
       brands: `${baseUrl}/api/brands`,
       cart: `${baseUrl}/api/cart`,
+      orders: `${baseUrl}/api/orders`,
+      wishlist: `${baseUrl}/api/wishlist`,
+      compare: `${baseUrl}/api/compare`,
       users: `${baseUrl}/api/users`,
-      // orders: `${baseUrl}/api/orders`,
     },
     endpoints: {
       health: {
@@ -225,6 +227,60 @@ app.get("/", (req, res) => {
           "/api/cart/clear": "Clear entire cart",
         },
       },
+      orders: {
+        get: {
+          "/api/orders": "Get all orders (admin)",
+          "/api/orders/my-orders": "Get current user's orders",
+          "/api/orders/:id": "Get single order by ID",
+          "/api/orders/:id/payment": "Get payment details",
+          "/api/orders/:id/tracking": "Get order tracking history",
+          "/api/orders/stats/dashboard": "Get order statistics (admin)",
+        },
+        post: {
+          "/api/orders/checkout": "Create new order from cart",
+        },
+        put: {
+          "/api/orders/:id/status": "Update order status (admin/editor)",
+          "/api/orders/:id/payment": "Update payment status (admin/editor)",
+          "/api/orders/:id/tracking": "Add tracking information (admin/editor)",
+          "/api/orders/:id/cancel": "Cancel order (user)",
+          "/api/orders/bulk-status": "Bulk update order status (admin)",
+        },
+      },
+      wishlist: {
+        get: {
+          "/api/wishlist": "Get user's wishlist",
+          "/api/wishlist/check/:productId": "Check if product is in wishlist",
+          "/api/wishlist/shared/:shareId": "Get public shared wishlist",
+        },
+        post: {
+          "/api/wishlist/add/:productId": "Add product to wishlist",
+          "/api/wishlist/move-to-cart/:itemId": "Move wishlist item to cart",
+        },
+        put: {
+          "/api/wishlist/settings": "Update wishlist settings (name, privacy)",
+        },
+        delete: {
+          "/api/wishlist/remove/:itemId": "Remove item from wishlist",
+          "/api/wishlist/clear": "Clear entire wishlist",
+        },
+      },
+      compare: {
+        get: {
+          "/api/compare": "Get user's compare list",
+          "/api/compare/table": "Get comparison table with all specs",
+        },
+        post: {
+          "/api/compare/add/:productId": "Add product to compare",
+        },
+        delete: {
+          "/api/compare/remove/:itemId": "Remove product from compare",
+          "/api/compare/clear": "Clear compare list",
+        },
+        put: {
+          "/api/compare/settings": "Update compare settings (admin)",
+        },
+      },
       users: {
         get: {
           "/api/users/profile": "Get user profile",
@@ -268,17 +324,19 @@ app.use("/api/users", userRoutes);
 // Brand routes
 app.use("/api/brands", brandRoutes);
 
-// Cart routes (NOW ACTIVE ✅)
+// Cart routes
 app.use("/api/cart", cartRoutes);
 
-// Order routes (Uncomment when ready)
-// app.use("/api/orders", orderRoutes);
+// Order routes
+app.use("/api/orders", orderRoutes);
 
-// Review routes (Uncomment when ready)
-// app.use("/api/reviews", reviewRoutes);
+// Wishlist routes
+app.use("/api/wishlist", wishlistRoutes);
 
-// Wishlist routes (Uncomment when ready)
-// app.use("/api/wishlist", wishlistRoutes);
+app.use("/api/email", emailRoutes);
+
+// Compare routes
+app.use("/api/compare", compareRoutes);
 
 /**
  * ====================================
@@ -356,6 +414,52 @@ app.get("/api", (req, res) => {
           clear: { url: "/clear", method: "DELETE", auth: true },
         },
       },
+      orders: {
+        base: `${baseUrl}/api/orders`,
+        endpoints: {
+          // User endpoints
+          myOrders: { url: "/my-orders", method: "GET", auth: true },
+          get: { url: "/:id", method: "GET", auth: true },
+          payment: { url: "/:id/payment", method: "GET", auth: true },
+          tracking: { url: "/:id/tracking", method: "GET", auth: true },
+          checkout: { url: "/checkout", method: "POST", auth: true },
+          cancel: { url: "/:id/cancel", method: "PUT", auth: true },
+          
+          // Admin/Editor endpoints
+          list: { url: "/", method: "GET", auth: true, role: "admin,editor" },
+          stats: { url: "/stats/dashboard", method: "GET", auth: true, role: "admin,editor" },
+          updateStatus: { url: "/:id/status", method: "PUT", auth: true, role: "admin,editor" },
+          updatePayment: { url: "/:id/payment", method: "PUT", auth: true, role: "admin,editor" },
+          addTracking: { url: "/:id/tracking", method: "PUT", auth: true, role: "admin,editor" },
+          
+          // Admin only
+          bulkStatus: { url: "/bulk-status", method: "PUT", auth: true, role: "admin" },
+        },
+      },
+      wishlist: {
+        base: `${baseUrl}/api/wishlist`,
+        endpoints: {
+          get: { url: "/", method: "GET", auth: true },
+          check: { url: "/check/:productId", method: "GET", auth: true },
+          shared: { url: "/shared/:shareId", method: "GET", auth: false },
+          add: { url: "/add/:productId", method: "POST", auth: true },
+          moveToCart: { url: "/move-to-cart/:itemId", method: "POST", auth: true },
+          settings: { url: "/settings", method: "PUT", auth: true },
+          remove: { url: "/remove/:itemId", method: "DELETE", auth: true },
+          clear: { url: "/clear", method: "DELETE", auth: true },
+        },
+      },
+      compare: {
+        base: `${baseUrl}/api/compare`,
+        endpoints: {
+          get: { url: "/", method: "GET", auth: true },
+          table: { url: "/table", method: "GET", auth: true },
+          add: { url: "/add/:productId", method: "POST", auth: true },
+          remove: { url: "/remove/:itemId", method: "DELETE", auth: true },
+          clear: { url: "/clear", method: "DELETE", auth: true },
+          settings: { url: "/settings", method: "PUT", auth: true, role: "admin" },
+        },
+      },
       users: {
         base: `${baseUrl}/api/users`,
         endpoints: {
@@ -391,6 +495,9 @@ app.use("*", (req, res) => {
       categories: "/api/categories",
       brands: "/api/brands",
       cart: "/api/cart",
+      orders: "/api/orders",
+      wishlist: "/api/wishlist",
+      compare: "/api/compare",
       users: "/api/users",
     },
     documentation: "Please check the API documentation at / for more details",
