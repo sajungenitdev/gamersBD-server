@@ -37,10 +37,10 @@ const rateLimit = require("express-rate-limit");
 const authRoutes = require("./routes/auth.routes");
 const healthRoutes = require("./routes/health.routes");
 const categoryRoutes = require("./routes/category.routes");
-const productRoutes = require("./routes/product.routes");
 const userRoutes = require("./routes/user.routes");
 const brandRoutes = require("./routes/brand.routes");
 const cartRoutes = require("./routes/cart.routes");
+const productRoutes = require("./routes/product.routes");
 const orderRoutes = require("./routes/order.routes");
 const wishlistRoutes = require("./routes/wishlist.routes");
 const compareRoutes = require("./routes/compare.routes");
@@ -76,6 +76,7 @@ const corsOptions = {
       "http://localhost:3000",
       "http://localhost:3001",
       "http://localhost:5173",
+      "http://localhost:5000",
       "https://gamersbd-frontend.vercel.app",
       "https://gamers-bd-admin.vercel.app",
       "https://gamersbd-server.onrender.com",

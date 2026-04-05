@@ -1,4 +1,3 @@
-// controllers/cart.controller.js
 const Cart = require("../models/Cart");
 const Product = require("../models/Product");
 
@@ -13,7 +12,6 @@ const getCart = async (req, res) => {
     });
 
     if (!cart) {
-      // Create empty cart if doesn't exist
       cart = await Cart.create({
         user: req.user._id,
         items: [],
@@ -25,6 +23,7 @@ const getCart = async (req, res) => {
       cart,
     });
   } catch (error) {
+    console.error("Get cart error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -36,10 +35,11 @@ const getCart = async (req, res) => {
 // @route   POST /api/cart/add
 // @access  Private
 const addToCart = async (req, res) => {
+  console.log("📦 Adding to cart:", req.body);
+  
   try {
-    const { productId, quantity = 1, platform } = req.body;
+    const { productId, quantity = 1, platform = "PS5" } = req.body;
 
-    // Validate input
     if (!productId) {
       return res.status(400).json({
         success: false,
@@ -47,7 +47,7 @@ const addToCart = async (req, res) => {
       });
     }
 
-    // Check if product exists
+    // Check product exists and has stock
     const product = await Product.findById(productId);
     if (!product) {
       return res.status(404).json({
@@ -56,69 +56,64 @@ const addToCart = async (req, res) => {
       });
     }
 
-    // Check stock
     if (product.stock < quantity) {
       return res.status(400).json({
         success: false,
-        message: `Only ${product.stock} items available in stock`,
+        message: `Only ${product.stock} items available`,
       });
     }
 
-    // Find user's cart
+    // Find or create cart
     let cart = await Cart.findOne({ user: req.user._id });
-
+    
     if (!cart) {
-      // Create new cart
       cart = new Cart({
         user: req.user._id,
         items: [],
       });
     }
 
-    // Check if product already in cart (with same platform)
+    // Check if product already in cart
     const existingItemIndex = cart.items.findIndex(
-      (item) =>
-        item.product.toString() === productId &&
-        (platform ? item.platform === platform : true),
+      (item) => item.product.toString() === productId
     );
 
     if (existingItemIndex > -1) {
-      // Update existing item quantity
+      // Update quantity
       const newQuantity = cart.items[existingItemIndex].quantity + quantity;
-
-      // Check stock for new total
+      
       if (product.stock < newQuantity) {
         return res.status(400).json({
           success: false,
-          message: `Cannot add ${quantity} more. Only ${product.stock} total available`,
+          message: `Cannot add ${quantity} more. Only ${product.stock - cart.items[existingItemIndex].quantity} available.`,
         });
       }
-
+      
       cart.items[existingItemIndex].quantity = newQuantity;
     } else {
       // Add new item
       cart.items.push({
         product: productId,
         quantity,
-        ...(platform && { platform }), // Only add platform if provided
+        platform,
       });
     }
 
-    // Save cart (triggers pre-save hook to calculate totals)
     await cart.save();
-
-    // Populate product details for response
+    
+    // Populate product details
     await cart.populate({
       path: "items.product",
       select: "name price discountPrice images stock category slug",
     });
 
-    res.status(200).json({
+    res.json({
       success: true,
-      message: "Item added to cart successfully",
+      message: "Item added to cart",
       cart,
     });
   } catch (error) {
+    console.error("Add to cart error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -150,9 +145,8 @@ const updateCartItem = async (req, res) => {
       });
     }
 
-    // Find the item in cart
     const itemIndex = cart.items.findIndex(
-      (item) => item._id.toString() === itemId,
+      (item) => item._id.toString() === itemId
     );
 
     if (itemIndex === -1) {
@@ -162,22 +156,17 @@ const updateCartItem = async (req, res) => {
       });
     }
 
-    // Check product stock
     const product = await Product.findById(cart.items[itemIndex].product);
     if (product.stock < quantity) {
       return res.status(400).json({
         success: false,
-        message: `Only ${product.stock} items available in stock`,
+        message: `Only ${product.stock} items available`,
       });
     }
 
-    // Update quantity
     cart.items[itemIndex].quantity = quantity;
-
-    // Save cart (triggers pre-save hook)
     await cart.save();
 
-    // Populate for response
     await cart.populate({
       path: "items.product",
       select: "name price discountPrice images stock category slug",
@@ -185,10 +174,11 @@ const updateCartItem = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Cart updated successfully",
+      message: "Cart updated",
       cart,
     });
   } catch (error) {
+    console.error("Update cart error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -212,13 +202,12 @@ const removeFromCart = async (req, res) => {
       });
     }
 
-    // Filter out the item
-    cart.items = cart.items.filter((item) => item._id.toString() !== itemId);
+    cart.items = cart.items.filter(
+      (item) => item._id.toString() !== itemId
+    );
 
-    // Save cart (triggers pre-save hook)
     await cart.save();
 
-    // Populate for response
     await cart.populate({
       path: "items.product",
       select: "name price discountPrice images stock category slug",
@@ -226,10 +215,11 @@ const removeFromCart = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Item removed from cart",
+      message: "Item removed",
       cart,
     });
   } catch (error) {
+    console.error("Remove from cart error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -237,7 +227,7 @@ const removeFromCart = async (req, res) => {
   }
 };
 
-// @desc    Clear entire cart
+// @desc    Clear cart
 // @route   DELETE /api/cart/clear
 // @access  Private
 const clearCart = async (req, res) => {
@@ -256,15 +246,11 @@ const clearCart = async (req, res) => {
 
     res.json({
       success: true,
-      message: "Cart cleared successfully",
-      cart: {
-        user: cart.user,
-        items: [],
-        totalItems: 0,
-        totalPrice: 0,
-      },
+      message: "Cart cleared",
+      cart: { user: cart.user, items: [] },
     });
   } catch (error) {
+    console.error("Clear cart error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -272,18 +258,20 @@ const clearCart = async (req, res) => {
   }
 };
 
-// @desc    Get cart item count
+// @desc    Get cart count
 // @route   GET /api/cart/count
 // @access  Private
 const getCartCount = async (req, res) => {
   try {
     const cart = await Cart.findOne({ user: req.user._id });
+    const count = cart?.items.reduce((sum, item) => sum + item.quantity, 0) || 0;
 
     res.json({
       success: true,
-      count: cart?.totalItems || 0,
+      count,
     });
   } catch (error) {
+    console.error("Get cart count error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -291,14 +279,12 @@ const getCartCount = async (req, res) => {
   }
 };
 
-// @desc    Validate cart items (check stock before checkout)
+// @desc    Validate cart
 // @route   GET /api/cart/validate
 // @access  Private
 const validateCart = async (req, res) => {
   try {
-    const cart = await Cart.findOne({ user: req.user._id }).populate(
-      "items.product",
-    );
+    const cart = await Cart.findOne({ user: req.user._id }).populate("items.product");
 
     if (!cart || cart.items.length === 0) {
       return res.json({
@@ -310,8 +296,6 @@ const validateCart = async (req, res) => {
     }
 
     const issues = [];
-
-    // Check each item for stock issues
     for (const item of cart.items) {
       if (item.product.stock < item.quantity) {
         issues.push({
@@ -319,7 +303,6 @@ const validateCart = async (req, res) => {
           productName: item.product.name,
           requested: item.quantity,
           available: item.product.stock,
-          platform: item.platform,
         });
       }
     }
@@ -328,17 +311,33 @@ const validateCart = async (req, res) => {
       success: true,
       valid: issues.length === 0,
       issues,
-      message:
-        issues.length > 0
-          ? "Some items have stock issues"
-          : "Cart is valid for checkout",
     });
   } catch (error) {
+    console.error("Validate cart error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
     });
   }
+};
+
+// @desc    Test cart routes
+// @route   GET /api/cart/test
+// @access  Public
+const testCart = (req, res) => {
+  res.json({
+    success: true,
+    message: "Cart routes are working!",
+    endpoints: [
+      "GET    /api/cart",
+      "GET    /api/cart/count",
+      "GET    /api/cart/validate",
+      "POST   /api/cart/add",
+      "PUT    /api/cart/update/:itemId",
+      "DELETE /api/cart/remove/:itemId",
+      "DELETE /api/cart/clear",
+    ],
+  });
 };
 
 module.exports = {
@@ -349,4 +348,5 @@ module.exports = {
   clearCart,
   getCartCount,
   validateCart,
+  testCart,
 };

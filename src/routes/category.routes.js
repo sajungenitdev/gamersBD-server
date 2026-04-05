@@ -1,30 +1,31 @@
+// routes/category.routes.js
 const express = require('express');
 const router = express.Router();
 const {
   getCategories,
   getCategoryById,
+  getCategoryBySlug,
   createCategory,
   updateCategory,
   deleteCategory,
-  getSubcategories
+  getSubcategories,
+  getSubcategoryBySlug,
+  getProductsByCategory,
+  getCategoryTree
 } = require('../controllers/category.controller');
 
-// Get all categories
+// Public routes
 router.get('/', getCategories);
-
-// Get subcategories of a category
+router.get('/tree', getCategoryTree);
+router.get('/slug/:slug', getCategoryBySlug);
+router.get('/slug/:categorySlug/:subcategorySlug', getSubcategoryBySlug);
 router.get('/:id/subcategories', getSubcategories);
-
-// Get single category by ID
+router.get('/:id/products', getProductsByCategory);  // Fixed: Changed endpoint
 router.get('/:id', getCategoryById);
 
-// Create new category
+// Protected routes (add auth middleware)
 router.post('/', createCategory);
-
-// Update category
 router.put('/:id', updateCategory);
-
-// Delete category
 router.delete('/:id', deleteCategory);
 
 module.exports = router;
