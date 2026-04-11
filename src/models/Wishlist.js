@@ -11,7 +11,7 @@ const wishlistItemSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
-  note: String // User can add personal note
+  note: String
 });
 
 const wishlistSchema = new mongoose.Schema({
@@ -19,7 +19,7 @@ const wishlistSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true,
-    unique: true // One wishlist per user
+    unique: true
   },
   items: [wishlistItemSchema],
   name: {
@@ -28,19 +28,20 @@ const wishlistSchema = new mongoose.Schema({
   },
   isPublic: {
     type: Boolean,
-    default: false // Can share wishlist with others
+    default: false
   },
   shareId: {
     type: String,
     unique: true,
-    sparse: true // For public sharing
-  },
-  totalItems: {
-    type: Number,
-    default: 0
+    sparse: true
   }
 }, {
   timestamps: true
+});
+
+// Add virtual for totalItems
+wishlistSchema.virtual('totalItems').get(function() {
+  return this.items.length;
 });
 
 // Generate share ID for public wishlist
@@ -49,8 +50,11 @@ wishlistSchema.pre('save', async function(next) {
     this.shareId = Math.random().toString(36).substring(2, 15) + 
                    Math.random().toString(36).substring(2, 15);
   }
-  this.totalItems = this.items.length;
   next();
 });
+
+// Ensure virtuals are included in JSON output
+wishlistSchema.set('toJSON', { virtuals: true });
+wishlistSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.model('Wishlist', wishlistSchema);

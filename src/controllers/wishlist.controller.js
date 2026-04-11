@@ -1,19 +1,35 @@
-// controllers/wishlist.controller.js
+const mongoose = require('mongoose');
 const Wishlist = require('../models/Wishlist');
 const Product = require('../models/Product');
+
+// Helper function to calculate final price
+const getFinalPrice = (product) => {
+  if (!product) return 0;
+  if (product.discountPrice && product.discountPrice < product.price) {
+    return product.discountPrice;
+  }
+  return product.price;
+};
 
 // @desc    Get user's wishlist
 // @route   GET /api/wishlist
 // @access  Private
 const getWishlist = async (req, res) => {
   try {
+    console.log('Fetching wishlist for user:', req.user._id);
+
     let wishlist = await Wishlist.findOne({ user: req.user._id })
       .populate({
         path: 'items.product',
-        select: 'name price discountPrice finalPrice images stock category brand platform rating slug'
+        select: 'name price discountPrice images stock category brand platform rating slug description',
+        populate: {
+          path: 'category',
+          select: 'name slug'
+        }
       });
 
     if (!wishlist) {
+      console.log('Creating new wishlist for user:', req.user._id);
       // Create empty wishlist if doesn't exist
       wishlist = await Wishlist.create({
         user: req.user._id,
@@ -22,6 +38,22 @@ const getWishlist = async (req, res) => {
       });
     }
 
+    // Add finalPrice to each product and filter out null products
+    const validItems = wishlist.items.filter(item => item.product !== null);
+    const enrichedItems = validItems.map(item => {
+      const product = item.product;
+      const productObj = product.toObject ? product.toObject() : product;
+      return {
+        _id: item._id,
+        product: {
+          ...productObj,
+          finalPrice: getFinalPrice(productObj)
+        },
+        addedAt: item.addedAt,
+        note: item.note
+      };
+    });
+
     res.json({
       success: true,
       wishlist: {
@@ -29,8 +61,8 @@ const getWishlist = async (req, res) => {
         name: wishlist.name,
         isPublic: wishlist.isPublic,
         shareId: wishlist.shareId,
-        totalItems: wishlist.totalItems,
-        items: wishlist.items,
+        totalItems: enrichedItems.length,
+        items: enrichedItems,
         createdAt: wishlist.createdAt,
         updatedAt: wishlist.updatedAt
       }
@@ -39,7 +71,8 @@ const getWishlist = async (req, res) => {
     console.error('Get wishlist error:', error);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
@@ -51,6 +84,16 @@ const addToWishlist = async (req, res) => {
   try {
     const { productId } = req.params;
     const { note } = req.body;
+
+    console.log('Adding to wishlist:', { userId: req.user._id, productId });
+
+    // Validate productId
+    if (!mongoose.Types.ObjectId.isValid(productId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid product ID'
+      });
+    }
 
     // Check if product exists
     const product = await Product.findById(productId);
@@ -94,13 +137,22 @@ const addToWishlist = async (req, res) => {
     // Populate product details
     await wishlist.populate({
       path: 'items.product',
-      select: 'name price discountPrice finalPrice images stock category brand platform rating slug'
+      select: 'name price discountPrice images stock category brand platform rating slug'
     });
 
     res.status(201).json({
       success: true,
       message: 'Product added to wishlist',
-      wishlist
+      wishlist: {
+        _id: wishlist._id,
+        name: wishlist.name,
+        isPublic: wishlist.isPublic,
+        shareId: wishlist.shareId,
+        totalItems: wishlist.items.length,
+        items: wishlist.items,
+        createdAt: wishlist.createdAt,
+        updatedAt: wishlist.updatedAt
+      }
     });
   } catch (error) {
     console.error('Add to wishlist error:', error);
@@ -117,6 +169,8 @@ const addToWishlist = async (req, res) => {
 const removeFromWishlist = async (req, res) => {
   try {
     const { itemId } = req.params;
+
+    console.log('Removing from wishlist:', { userId: req.user._id, itemId });
 
     const wishlist = await Wishlist.findOne({ user: req.user._id });
 
@@ -136,13 +190,22 @@ const removeFromWishlist = async (req, res) => {
 
     await wishlist.populate({
       path: 'items.product',
-      select: 'name price discountPrice finalPrice images stock category brand platform rating slug'
+      select: 'name price discountPrice images stock category brand platform rating slug'
     });
 
     res.json({
       success: true,
       message: 'Item removed from wishlist',
-      wishlist
+      wishlist: {
+        _id: wishlist._id,
+        name: wishlist.name,
+        isPublic: wishlist.isPublic,
+        shareId: wishlist.shareId,
+        totalItems: wishlist.items.length,
+        items: wishlist.items,
+        createdAt: wishlist.createdAt,
+        updatedAt: wishlist.updatedAt
+      }
     });
   } catch (error) {
     console.error('Remove from wishlist error:', error);
@@ -153,8 +216,41 @@ const removeFromWishlist = async (req, res) => {
   }
 };
 
-// @desc    Clear entire wishlist
-// @route   DELETE /api/wishlist/clear
+
+const checkWishlist = async (req, res) => {
+  try {
+    const { productId } = req.params;
+
+    const wishlist = await Wishlist.findOne({ user: req.user._id });
+
+    if (!wishlist) {
+      return res.json({
+        success: true,
+        inWishlist: false,
+        itemId: null
+      });
+    }
+
+    const wishlistItem = wishlist.items.find(
+      item => item.product.toString() === productId
+    );
+
+    res.json({
+      success: true,
+      inWishlist: !!wishlistItem,
+      itemId: wishlistItem ? wishlistItem._id : null
+    });
+  } catch (error) {
+    console.error('Check wishlist error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// @desc    Check if product is in user's wishlist
+// @route   GET /api/wishlist/check/:productId
 // @access  Private
 const clearWishlist = async (req, res) => {
   try {
@@ -202,7 +298,6 @@ const moveToCart = async (req, res) => {
       });
     }
 
-    // Find the wishlist item
     const wishlistItem = wishlist.items.find(
       item => item._id.toString() === itemId
     );
@@ -216,15 +311,21 @@ const moveToCart = async (req, res) => {
 
     const product = wishlistItem.product;
 
-    // Check stock
-    if (product.stock < quantity) {
-      return res.status(400).json({
+    if (!product) {
+      return res.status(404).json({
         success: false,
-        message: `Only ${product.stock} items available in stock`
+        message: 'Product not found'
       });
     }
 
-    // Get user's cart
+    if (product.stock < quantity) {
+      return res.status(400).json({
+        success: false,
+        message: `Only ${product.stock} items available`
+      });
+    }
+
+    // Get or create cart
     const Cart = require('../models/Cart');
     let cart = await Cart.findOne({ user: req.user._id });
 
@@ -235,21 +336,17 @@ const moveToCart = async (req, res) => {
       });
     }
 
-    // Check if already in cart
     const cartItemIndex = cart.items.findIndex(
-      item => item.product.toString() === product._id.toString() && 
-              (!platform || item.platform === platform)
+      item => item.product.toString() === product._id.toString()
     );
 
     if (cartItemIndex > -1) {
-      // Update quantity in cart
       cart.items[cartItemIndex].quantity += quantity;
     } else {
-      // Add to cart
       cart.items.push({
         product: product._id,
         quantity,
-        platform: platform || product.platform?.[0]
+        platform: platform || product.platform?.[0] || 'PS5'
       });
     }
 
@@ -263,7 +360,7 @@ const moveToCart = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Item moved to cart successfully',
+      message: 'Item moved to cart',
       cart,
       wishlist
     });
@@ -299,7 +396,7 @@ const updateWishlistSettings = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Wishlist settings updated',
+      message: 'Settings updated',
       wishlist: {
         name: wishlist.name,
         isPublic: wishlist.isPublic,
@@ -307,7 +404,7 @@ const updateWishlistSettings = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Update wishlist settings error:', error);
+    console.error('Update settings error:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -325,63 +422,27 @@ const getSharedWishlist = async (req, res) => {
     const wishlist = await Wishlist.findOne({ shareId, isPublic: true })
       .populate({
         path: 'items.product',
-        select: 'name price discountPrice finalPrice images stock category brand platform rating slug'
+        select: 'name price discountPrice images stock category brand platform rating slug'
       });
 
     if (!wishlist) {
       return res.status(404).json({
         success: false,
-        message: 'Shared wishlist not found or not public'
+        message: 'Wishlist not found or not public'
       });
     }
 
-    // Don't show user info for privacy
     res.json({
       success: true,
       wishlist: {
         name: wishlist.name,
-        totalItems: wishlist.totalItems,
+        totalItems: wishlist.items.length,
         items: wishlist.items,
         createdAt: wishlist.createdAt
       }
     });
   } catch (error) {
     console.error('Get shared wishlist error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-};
-
-// @desc    Check if product is in user's wishlist
-// @route   GET /api/wishlist/check/:productId
-// @access  Private
-const checkWishlist = async (req, res) => {
-  try {
-    const { productId } = req.params;
-
-    const wishlist = await Wishlist.findOne({ user: req.user._id });
-
-    if (!wishlist) {
-      return res.json({
-        success: true,
-        inWishlist: false
-      });
-    }
-
-    const inWishlist = wishlist.items.some(
-      item => item.product.toString() === productId
-    );
-
-    res.json({
-      success: true,
-      inWishlist,
-      itemId: inWishlist ? 
-        wishlist.items.find(item => item.product.toString() === productId)._id : null
-    });
-  } catch (error) {
-    console.error('Check wishlist error:', error);
     res.status(500).json({
       success: false,
       message: error.message
