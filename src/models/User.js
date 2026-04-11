@@ -2,7 +2,9 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
-  // Basic Information
+  // ====================================
+  // BASIC INFORMATION
+  // ====================================
   name: {
     type: String,
     required: [true, 'Please add a name'],
@@ -25,8 +27,10 @@ const userSchema = new mongoose.Schema({
     minlength: 6,
     select: false
   },
-
-  // Personal Information
+  
+  // ====================================
+  // PERSONAL INFORMATION
+  // ====================================
   firstName: {
     type: String,
     default: '',
@@ -56,22 +60,25 @@ const userSchema = new mongoose.Schema({
     enum: ['male', 'female', 'other', 'prefer_not_to_say'],
     default: 'prefer_not_to_say'
   },
-
-  // Avatar (Base64)
+  
+  // ====================================
+  // AVATAR (Base64)
+  // ====================================
   avatar: {
     type: String,
     default: null,
     validate: {
-      validator: function (v) {
+      validator: function(v) {
         if (!v) return true;
-        // Validate base64 image format
         return /^data:image\/(jpeg|png|jpg|gif|webp);base64,/.test(v);
       },
       message: 'Avatar must be a valid base64 encoded image'
     }
   },
-
-  // Account Settings
+  
+  // ====================================
+  // ACCOUNT SETTINGS
+  // ====================================
   role: {
     type: String,
     enum: ['user', 'admin', 'editor', 'moderator'],
@@ -102,8 +109,10 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
-
-  // Address Information
+  
+  // ====================================
+  // ADDRESS INFORMATION
+  // ====================================
   address: {
     street: { type: String, default: '' },
     city: { type: String, default: '' },
@@ -112,7 +121,7 @@ const userSchema = new mongoose.Schema({
     country: { type: String, default: 'Bangladesh' },
     isDefault: { type: Boolean, default: false }
   },
-
+  
   // Multiple Addresses
   addresses: [{
     street: { type: String, required: true },
@@ -121,10 +130,14 @@ const userSchema = new mongoose.Schema({
     postalCode: { type: String, required: true },
     country: { type: String, default: 'Bangladesh' },
     isDefault: { type: Boolean, default: false },
-    label: { type: String, default: 'Home' } // Home, Work, etc.
+    label: { type: String, default: 'Home' },
+    phone: { type: String, default: '' },
+    fullName: { type: String, default: '' }
   }],
-
-  // Social Links
+  
+  // ====================================
+  // SOCIAL MEDIA LINKS
+  // ====================================
   social: {
     facebook: { type: String, default: '' },
     twitter: { type: String, default: '' },
@@ -132,61 +145,78 @@ const userSchema = new mongoose.Schema({
     linkedin: { type: String, default: '' },
     discord: { type: String, default: '' },
     twitch: { type: String, default: '' },
-    youtube: { type: String, default: '' }
+    youtube: { type: String, default: '' },
+    tiktok: { type: String, default: '' }
   },
-
-  // Gaming Preferences
+  
+  // ====================================
+  // GAMING PREFERENCES
+  // ====================================
   gaming: {
     favoritePlatforms: [{
       type: String,
-      enum: ['PS5', 'Xbox', 'PC', 'Nintendo Switch', 'Mobile']
+      enum: ['PS5', 'PS4', 'Xbox Series X', 'Xbox One', 'PC', 'Nintendo Switch', 'Mobile', 'VR']
     }],
     favoriteGenres: [{
       type: String,
-      enum: ['Action', 'Adventure', 'RPG', 'Shooter', 'Strategy', 'Sports', 'Racing', 'Horror', 'Fighting']
+      enum: ['Action', 'Adventure', 'RPG', 'Shooter', 'Strategy', 'Sports', 'Racing', 'Horror', 'Fighting', 'Simulation', 'Battle Royale', 'MOBA']
     }],
     gamerTag: { type: String, default: '' },
     steamId: { type: String, default: '' },
     epicId: { type: String, default: '' },
     xboxGamertag: { type: String, default: '' },
-    psnId: { type: String, default: '' }
+    psnId: { type: String, default: '' },
+    nintendoFriendCode: { type: String, default: '' },
+    riotId: { type: String, default: '' },
+    battleNetId: { type: String, default: '' }
   },
-
-  // Preferences
+  
+  // ====================================
+  // USER PREFERENCES
+  // ====================================
   preferences: {
     newsletter: { type: Boolean, default: false },
     emailNotifications: { type: Boolean, default: true },
     smsNotifications: { type: Boolean, default: false },
+    pushNotifications: { type: Boolean, default: true },
     twoFactorEnabled: { type: Boolean, default: false },
     twoFactorSecret: { type: String, default: null },
     language: { type: String, default: 'en' },
     currency: { type: String, default: 'BDT' },
-    timezone: { type: String, default: 'Asia/Dhaka' }
+    timezone: { type: String, default: 'Asia/Dhaka' },
+    theme: { type: String, enum: ['light', 'dark', 'system'], default: 'dark' }
   },
-
-  // Statistics
+  
+  // ====================================
+  // STATISTICS
+  // ====================================
   stats: {
     totalOrders: { type: Number, default: 0 },
     totalSpent: { type: Number, default: 0 },
     reviewsWritten: { type: Number, default: 0 },
     wishlistCount: { type: Number, default: 0 },
+    compareCount: { type: Number, default: 0 },
     lastLoginAt: { type: Date, default: null },
-    loginCount: { type: Number, default: 0 }
+    loginCount: { type: Number, default: 0 },
+    accountAge: { type: Number, default: 0 } // in days
   },
-
-  // Wishlist (references to products)
+  
+  // ====================================
+  // WISHLIST & COMPARE
+  // ====================================
   wishlist: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product'
   }],
-
-  // Compare list
+  
   compareList: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Product'
   }],
-
-  // Recently viewed products
+  
+  // ====================================
+  // RECENTLY VIEWED PRODUCTS
+  // ====================================
   recentlyViewed: [{
     product: {
       type: mongoose.Schema.Types.ObjectId,
@@ -197,21 +227,34 @@ const userSchema = new mongoose.Schema({
       default: Date.now
     }
   }],
-
-  // Security
+  
+  // ====================================
+  // CART REFERENCE (One-to-One)
+  // ====================================
+  cart: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Cart'
+  },
+  
+  // ====================================
+  // SECURITY
+  // ====================================
   lastPasswordChange: {
     type: Date,
     default: Date.now
   },
   sessionTokens: [{
-    token: String,
-    device: String,
-    browser: String,
-    ip: String,
+    token: { type: String },
+    device: { type: String, default: 'Unknown' },
+    browser: { type: String, default: 'Unknown' },
+    ip: { type: String, default: 'Unknown' },
+    location: { type: String, default: 'Unknown' },
     createdAt: { type: Date, default: Date.now }
   }],
-
-  // Account deletion
+  
+  // ====================================
+  // ACCOUNT MANAGEMENT
+  // ====================================
   deletionRequested: {
     type: Boolean,
     default: false
@@ -219,6 +262,31 @@ const userSchema = new mongoose.Schema({
   deletionScheduledAt: {
     type: Date,
     default: null
+  },
+  notes: {
+    type: String,
+    default: ''
+  },
+  
+  // ====================================
+  // REFERRAL SYSTEM
+  // ====================================
+  referralCode: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+  referredBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  referralCount: {
+    type: Number,
+    default: 0
+  },
+  referralEarnings: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true,
@@ -227,22 +295,24 @@ const userSchema = new mongoose.Schema({
 });
 
 // ====================================
-// Indexes for better performance
+// INDEXES FOR PERFORMANCE
 // ====================================
 userSchema.index({ email: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ status: 1 });
 userSchema.index({ 'gaming.gamerTag': 1 });
+userSchema.index({ referralCode: 1 });
 userSchema.index({ createdAt: -1 });
+userSchema.index({ 'stats.totalSpent': -1 });
 
 // ====================================
-// Virtuals
+// VIRTUALS
 // ====================================
-userSchema.virtual('fullName').get(function () {
+userSchema.virtual('fullName').get(function() {
   return `${this.firstName} ${this.lastName}`.trim() || this.name;
 });
 
-userSchema.virtual('initials').get(function () {
+userSchema.virtual('initials').get(function() {
   return this.name
     .split(' ')
     .map(n => n[0])
@@ -251,14 +321,23 @@ userSchema.virtual('initials').get(function () {
     .substring(0, 2);
 });
 
+userSchema.virtual('isAdmin').get(function() {
+  return this.role === 'admin';
+});
+
+userSchema.virtual('isActive').get(function() {
+  return this.status === 'active';
+});
+
 // ====================================
-// Pre-save middleware - Hash password
+// PRE-SAVE MIDDLEWARE - Hash password
 // ====================================
-userSchema.pre('save', async function (next) {
+userSchema.pre('save', async function(next) {
+  // Only hash password if it's modified
   if (!this.isModified('password')) {
     return next();
   }
-
+  
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
@@ -269,9 +348,9 @@ userSchema.pre('save', async function (next) {
 });
 
 // ====================================
-// Pre-save middleware - Update name from firstName/lastName
+// PRE-SAVE - Update name from firstName/lastName
 // ====================================
-userSchema.pre('save', function (next) {
+userSchema.pre('save', function(next) {
   if (this.firstName || this.lastName) {
     const firstName = this.firstName || '';
     const lastName = this.lastName || '';
@@ -281,57 +360,67 @@ userSchema.pre('save', function (next) {
 });
 
 // ====================================
-// Methods
+// PRE-SAVE - Generate referral code
+// ====================================
+userSchema.pre('save', async function(next) {
+  if (!this.referralCode) {
+    this.referralCode = 'REF' + Math.random().toString(36).substring(2, 10).toUpperCase();
+  }
+  next();
+});
+
+// ====================================
+// METHODS
 // ====================================
 
 // Compare password
-userSchema.methods.comparePassword = async function (enteredPassword) {
+userSchema.methods.comparePassword = async function(enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
 // Update login stats
-userSchema.methods.updateLoginStats = async function (deviceInfo = {}) {
+userSchema.methods.updateLoginStats = async function(deviceInfo = {}) {
   this.stats.lastLoginAt = new Date();
   this.stats.loginCount += 1;
-
-  // Add session token
+  
   if (deviceInfo.token) {
     this.sessionTokens.push({
       token: deviceInfo.token,
       device: deviceInfo.device || 'Unknown',
       browser: deviceInfo.browser || 'Unknown',
-      ip: deviceInfo.ip || 'Unknown'
+      ip: deviceInfo.ip || 'Unknown',
+      location: deviceInfo.location || 'Unknown'
     });
-
+    
     // Keep only last 10 sessions
     if (this.sessionTokens.length > 10) {
       this.sessionTokens = this.sessionTokens.slice(-10);
     }
   }
-
+  
   await this.save();
 };
 
 // Add to recently viewed
-userSchema.methods.addToRecentlyViewed = async function (productId) {
+userSchema.methods.addToRecentlyViewed = async function(productId) {
   // Remove if already exists
   this.recentlyViewed = this.recentlyViewed.filter(
     item => item.product.toString() !== productId.toString()
   );
-
+  
   // Add to beginning
   this.recentlyViewed.unshift({ product: productId, viewedAt: new Date() });
-
+  
   // Keep only last 20
   if (this.recentlyViewed.length > 20) {
     this.recentlyViewed = this.recentlyViewed.slice(0, 20);
   }
-
+  
   await this.save();
 };
 
 // Add to wishlist
-userSchema.methods.addToWishlist = async function (productId) {
+userSchema.methods.addToWishlist = async function(productId) {
   if (!this.wishlist.includes(productId)) {
     this.wishlist.push(productId);
     this.stats.wishlistCount = this.wishlist.length;
@@ -341,7 +430,7 @@ userSchema.methods.addToWishlist = async function (productId) {
 };
 
 // Remove from wishlist
-userSchema.methods.removeFromWishlist = async function (productId) {
+userSchema.methods.removeFromWishlist = async function(productId) {
   this.wishlist = this.wishlist.filter(
     id => id.toString() !== productId.toString()
   );
@@ -351,7 +440,8 @@ userSchema.methods.removeFromWishlist = async function (productId) {
 };
 
 // Generate email verification token
-userSchema.methods.generateEmailVerificationToken = function () {
+userSchema.methods.generateEmailVerificationToken = function() {
+  const crypto = require('crypto');
   const token = crypto.randomBytes(32).toString('hex');
   this.emailVerificationToken = token;
   this.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
@@ -359,24 +449,34 @@ userSchema.methods.generateEmailVerificationToken = function () {
 };
 
 // Generate password reset token
-userSchema.methods.generatePasswordResetToken = function () {
+userSchema.methods.generatePasswordResetToken = function() {
+  const crypto = require('crypto');
   const token = crypto.randomBytes(32).toString('hex');
   this.passwordResetToken = token;
   this.passwordResetExpires = Date.now() + 1 * 60 * 60 * 1000; // 1 hour
   return token;
 };
 
+// Add referral earnings
+userSchema.methods.addReferralEarnings = async function(amount) {
+  this.referralEarnings += amount;
+  await this.save();
+};
+
 // ====================================
-// Static Methods
+// STATIC METHODS
 // ====================================
 
 // Find active users
-userSchema.statics.findActive = function () {
+userSchema.statics.findActive = function() {
   return this.find({ status: 'active' });
 };
 
 // Get user statistics
-userSchema.statics.getStats = async function () {
+userSchema.statics.getStats = async function() {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  
   return {
     total: await this.countDocuments(),
     active: await this.countDocuments({ status: 'active' }),
@@ -384,19 +484,29 @@ userSchema.statics.getStats = async function () {
     users: await this.countDocuments({ role: 'user' }),
     verified: await this.countDocuments({ emailVerified: true }),
     newToday: await this.countDocuments({
-      createdAt: { $gte: new Date().setHours(0, 0, 0, 0) }
-    })
+      createdAt: { $gte: today }
+    }),
+    totalSpent: await this.aggregate([
+      { $group: { _id: null, total: { $sum: '$stats.totalSpent' } } }
+    ]).then(res => res[0]?.total || 0)
   };
 };
 
+// Get top users by spending
+userSchema.statics.getTopSpenders = async function(limit = 10) {
+  return this.find({ 'stats.totalSpent': { $gt: 0 } })
+    .sort({ 'stats.totalSpent': -1 })
+    .limit(limit)
+    .select('name email stats.totalSpent avatar');
+};
+
 // ====================================
-// Helper function to convert image to base64
+// HELPER FUNCTIONS
 // ====================================
 const imageToBase64 = (imageBuffer, mimeType) => {
   return `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
 };
 
-// Helper function to validate base64 image
 const isValidBase64Image = (base64String) => {
   if (!base64String) return true;
   return /^data:image\/(jpeg|png|jpg|gif|webp);base64,/.test(base64String);

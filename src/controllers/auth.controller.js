@@ -10,19 +10,11 @@ const generateToken = (id, role) => {
 // REGISTER - No next parameter
 const register = async (req, res) => {
   try {
-    console.log('📝 Register attempt:', req.body);
+    const { name, email, password, role, adminSecret } = req.body;
 
-    const { name, email, password } = req.body;
+    console.log('📝 Registration attempt:', { name, email });
 
-    // Validation
-    if (!name || !email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide name, email and password'
-      });
-    }
-
-    // Check existing user
+    // Check if user exists
     const userExists = await User.findOne({ email });
     if (userExists) {
       return res.status(400).json({
@@ -31,12 +23,49 @@ const register = async (req, res) => {
       });
     }
 
-    // Create user
+    // Split name for firstName/lastName
+    const nameParts = name.split(' ');
+    const firstName = nameParts[0] || '';
+    const lastName = nameParts.slice(1).join(' ') || '';
+
+    // Determine user role
+    let userRole = 'user';
+    if (role === 'admin' && adminSecret === process.env.ADMIN_SECRET) {
+      userRole = 'admin';
+    }
+
+    // Create user with all fields
     const user = await User.create({
       name,
       email,
       password,
-      role: 'user'
+      role: userRole,
+      firstName,
+      lastName,
+      phone: '',
+      bio: '',
+      avatar: null,
+      address: {
+        street: '',
+        city: '',
+        state: '',
+        postalCode: '',
+        country: 'Bangladesh'
+      },
+      preferences: {
+        newsletter: false,
+        emailNotifications: true,
+        language: 'en',
+        currency: 'BDT',
+        theme: 'dark'
+      },
+      stats: {
+        totalOrders: 0,
+        totalSpent: 0,
+        reviewsWritten: 0,
+        wishlistCount: 0,
+        loginCount: 0
+      }
     });
 
     const token = generateToken(user._id, user.role);
@@ -49,11 +78,17 @@ const register = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        phone: user.phone,
+        bio: user.bio,
+        avatar: user.avatar,
+        createdAt: user.createdAt,
         token
       }
     });
   } catch (error) {
-    console.error('❌ Register error:', error);
+    console.error('Registration error:', error);
     res.status(500).json({
       success: false,
       message: error.message
