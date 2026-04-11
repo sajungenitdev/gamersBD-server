@@ -43,6 +43,7 @@ const contactRoutes = require("./routes/contact.routes");
 const faqRoutes = require("./routes/faq.routes");
 const siteSettingRoutes = require("./routes/siteSetting.routes");
 const indexRoutes = require('./routes/index');
+const reviewRoutes = require('./routes/review.routes');
 
 // Initialize Express application
 const app = express();
@@ -200,6 +201,8 @@ app.use("/api/compare", compareRoutes);
 app.get('/test-route', (req, res) => {
   res.json({ success: true, message: 'Test route working' });
 });
+// reviews route
+app.use('/api/reviews', reviewRoutes);
 
 /**
  * ====================================
