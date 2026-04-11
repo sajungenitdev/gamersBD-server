@@ -2,8 +2,15 @@
 const Order = require("../models/Order");
 const Cart = require("../models/Cart");
 const Product = require("../models/Product");
-const User = require("../models/User"); // Make sure to import User
+const User = require("../models/User");
 const emailService = require('../services/email.service');
+
+// Helper function to calculate product price
+const getProductPrice = (product) => {
+  return product.discountPrice && product.discountPrice < product.price
+    ? product.discountPrice
+    : product.price;
+};
 
 // @desc    Create order from cart
 // @route   POST /api/orders/checkout
@@ -11,6 +18,16 @@ const emailService = require('../services/email.service');
 const createOrder = async (req, res) => {
   try {
     const { shippingAddress, billingAddress, payment, notes } = req.body;
+
+    // Validate shipping address
+    if (!shippingAddress || !shippingAddress.fullName || !shippingAddress.addressLine1 ||
+      !shippingAddress.city || !shippingAddress.state || !shippingAddress.postalCode ||
+      !shippingAddress.country || !shippingAddress.phone) {
+      return res.status(400).json({
+        success: false,
+        message: "Complete shipping address is required",
+      });
+    }
 
     // Validate payment info
     if (!payment || !payment.method) {
@@ -21,13 +38,7 @@ const createOrder = async (req, res) => {
     }
 
     // Validate transaction ID for online payments
-    const onlineMethods = [
-      "bkash",
-      "nagad",
-      "rocket",
-      "credit_card",
-      "debit_card",
-    ];
+    const onlineMethods = ["bkash", "nagad", "rocket", "credit_card", "debit_card"];
     if (onlineMethods.includes(payment.method) && !payment.transactionId) {
       return res.status(400).json({
         success: false,
@@ -45,9 +56,7 @@ const createOrder = async (req, res) => {
     }
 
     // Get user's cart with populated products
-    const cart = await Cart.findOne({ user: req.user._id }).populate(
-      "items.product",
-    );
+    const cart = await Cart.findOne({ user: req.user._id }).populate("items.product");
 
     if (!cart || cart.items.length === 0) {
       return res.status(400).json({
@@ -56,30 +65,42 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // Validate stock for each item
+    // Calculate subtotal and validate stock
+    let subtotal = 0;
+    const orderItems = [];
+
     for (const item of cart.items) {
-      if (item.product.stock < item.quantity) {
+      const product = item.product;
+      if (!product) {
         return res.status(400).json({
           success: false,
-          message: `Insufficient stock for ${item.product.name}. Available: ${item.product.stock}`,
+          message: "Product not found in cart",
         });
       }
+
+      if (product.stock < item.quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient stock for ${product.name}. Available: ${product.stock}`,
+        });
+      }
+
+      const priceAtTime = getProductPrice(product);
+      subtotal += priceAtTime * item.quantity;
+
+      orderItems.push({
+        product: product._id,
+        quantity: item.quantity,
+        platform: item.platform || "PS5",
+        priceAtTime,
+      });
     }
 
     // Calculate totals
-    const subtotal = cart.totalPrice;
     const shippingCost = subtotal > 100 ? 0 : 10; // Free shipping over $100
     const tax = subtotal * 0.1; // 10% tax
     const discount = 0; // You can add coupon logic here
     const total = subtotal + shippingCost + tax - discount;
-
-    // Create order items
-    const orderItems = cart.items.map((item) => ({
-      product: item.product._id,
-      quantity: item.quantity,
-      platform: item.platform,
-      priceAtTime: item.product.finalPrice || item.product.price,
-    }));
 
     // Generate order number
     const generateOrderNumber = () => {
@@ -87,9 +108,7 @@ const createOrder = async (req, res) => {
       const year = date.getFullYear().toString().slice(-2);
       const month = (date.getMonth() + 1).toString().padStart(2, "0");
       const day = date.getDate().toString().padStart(2, "0");
-      const random = Math.floor(Math.random() * 10000)
-        .toString()
-        .padStart(4, "0");
+      const random = Math.floor(Math.random() * 10000).toString().padStart(4, "0");
       return `ORD-${year}${month}${day}-${random}`;
     };
 
@@ -97,7 +116,7 @@ const createOrder = async (req, res) => {
 
     // Initial status - determine based on payment method
     const initialStatus = payment.method === "cash_on_delivery" ? "pending" : "confirmed";
-    
+
     // Create status history
     const statusHistory = [{
       status: initialStatus,
@@ -153,8 +172,6 @@ const createOrder = async (req, res) => {
 
     // Clear cart
     cart.items = [];
-    cart.totalItems = 0;
-    cart.totalPrice = 0;
     await cart.save();
 
     // Populate order for response
@@ -162,25 +179,13 @@ const createOrder = async (req, res) => {
       .populate("items.product", "name price images slug")
       .populate("user", "name email phone");
 
-    // ============================================
-    // 📧 SEND ORDER CONFIRMATION EMAIL (ASYNC)
-    // ============================================
+    // Send order confirmation email (async, don't await)
     try {
-      // Send email asynchronously - don't await to not block response
-      emailService.sendOrderConfirmation(populatedOrder, req.user)
-        .then(result => {
-          if (result.success) {
-            console.log(`✅ Order confirmation email sent for order ${orderNumber}`);
-          } else {
-            console.error(`❌ Failed to send order confirmation email:`, result.error);
-          }
-        })
-        .catch(err => {
-          console.error('❌ Order confirmation email error:', err.message);
-        });
+      emailService.sendOrderConfirmation(populatedOrder, req.user).catch(err => {
+        console.error('Order confirmation email error:', err.message);
+      });
     } catch (emailError) {
-      // Log but don't fail the order if email fails
-      console.error('📧 Email sending error (non-blocking):', emailError.message);
+      console.error('Email error:', emailError.message);
     }
 
     res.status(201).json({
@@ -293,7 +298,7 @@ const cancelOrder = async (req, res) => {
     // Update order status
     order.status = "cancelled";
     order.cancelledAt = new Date();
-    
+
     // Add to status history
     order.statusHistory.push({
       status: "cancelled",
@@ -301,7 +306,7 @@ const cancelOrder = async (req, res) => {
       updatedBy: req.user._id,
       updatedAt: new Date()
     });
-    
+
     await order.save();
 
     // Restore stock
@@ -328,6 +333,98 @@ const cancelOrder = async (req, res) => {
   }
 };
 
+// @desc    Get payment details for an order
+// @route   GET /api/orders/:id/payment
+// @access  Private
+const getPaymentDetails = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+      .select("orderNumber payment status user")
+      .populate("user", "name email");
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    // Check authorization
+    const isOwner = order.user && order.user._id.toString() === req.user._id.toString();
+    const isAdminOrEditor = req.user.role === "admin" || req.user.role === "editor";
+
+    if (!isOwner && !isAdminOrEditor) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to view this order",
+      });
+    }
+
+    res.json({
+      success: true,
+      payment: order.payment || {
+        method: "Not set",
+        status: "pending",
+        transactionId: null,
+      },
+    });
+  } catch (error) {
+    console.error("Get payment details error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// @desc    Get order tracking history
+// @route   GET /api/orders/:id/tracking
+// @access  Private
+const getOrderTracking = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+      .select('orderNumber status statusHistory trackingNumber carrier trackingUrl estimatedDelivery actualDelivery user');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    // Check authorization
+    const isOwner = order.user.toString() === req.user._id.toString();
+    const isAdminOrEditor = req.user.role === "admin" || req.user.role === "editor";
+
+    if (!isOwner && !isAdminOrEditor) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to view this order",
+      });
+    }
+
+    res.json({
+      success: true,
+      tracking: {
+        orderNumber: order.orderNumber,
+        currentStatus: order.status,
+        trackingNumber: order.trackingNumber,
+        carrier: order.carrier,
+        trackingUrl: order.trackingUrl,
+        estimatedDelivery: order.estimatedDelivery,
+        actualDelivery: order.actualDelivery,
+        history: order.statusHistory.sort((a, b) => b.updatedAt - a.updatedAt)
+      }
+    });
+  } catch (error) {
+    console.error("Get order tracking error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 // ============================================
 // ADMIN/EDITOR CONTROLLERS
 // ============================================
@@ -337,19 +434,13 @@ const cancelOrder = async (req, res) => {
 // @access  Private/Admin/Editor
 const getAllOrders = async (req, res) => {
   try {
-    // Pagination
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    // Filter by status if provided
     const filter = {};
-    if (req.query.status) {
-      filter.status = req.query.status;
-    }
-    if (req.query.paymentStatus) {
-      filter["payment.status"] = req.query.paymentStatus;
-    }
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.paymentStatus) filter["payment.status"] = req.query.paymentStatus;
 
     const orders = await Order.find(filter)
       .sort("-createdAt")
@@ -377,25 +468,17 @@ const getAllOrders = async (req, res) => {
   }
 };
 
-// @desc    Update order status with full workflow (admin/editor)
+// @desc    Update order status (admin/editor)
 // @route   PUT /api/orders/:id/status
 // @access  Private/Admin/Editor
 const updateOrderStatus = async (req, res) => {
   try {
     const { status, note } = req.body;
 
-    // Complete status workflow
     const validStatuses = [
-      "pending",           // Order placed, payment pending
-      "confirmed",         // Payment confirmed, order accepted
-      "processing",        // Being prepared
-      "shipped",           // Handed to courier
-      "in_transit",        // On the way
-      "out_for_delivery",  // Out for local delivery
-      "delivered",         // Successfully delivered
-      "cancelled",         // Cancelled by user/admin
-      "refunded",          // Money returned
-      "on_hold"            // Temporarily paused
+      "pending", "confirmed", "processing", "shipped",
+      "in_transit", "out_for_delivery", "delivered",
+      "cancelled", "refunded", "on_hold"
     ];
 
     if (!validStatuses.includes(status)) {
@@ -428,7 +511,6 @@ const updateOrderStatus = async (req, res) => {
       'on_hold': ['confirmed', 'processing', 'shipped', 'in_transit', 'out_for_delivery', 'cancelled']
     };
 
-    // Check if transition is valid
     if (order.status !== status && !validTransitions[order.status].includes(status)) {
       return res.status(400).json({
         success: false,
@@ -437,8 +519,8 @@ const updateOrderStatus = async (req, res) => {
     }
 
     // Handle stock for cancelled/refunded orders
-    if ((status === 'cancelled' || status === 'refunded') && 
-        order.status !== 'cancelled' && order.status !== 'refunded') {
+    if ((status === 'cancelled' || status === 'refunded') &&
+      order.status !== 'cancelled' && order.status !== 'refunded') {
       for (const item of order.items) {
         await Product.findByIdAndUpdate(item.product, {
           $inc: { stock: item.quantity }
@@ -446,7 +528,7 @@ const updateOrderStatus = async (req, res) => {
       }
     }
 
-    // Update timestamps based on status
+    // Update timestamps
     const timestampFields = {
       'confirmed': 'confirmedAt',
       'processing': 'processedAt',
@@ -463,7 +545,6 @@ const updateOrderStatus = async (req, res) => {
       order[timestampFields[status]] = new Date();
     }
 
-    // Add to status history
     order.statusHistory.push({
       status,
       note: note || `Status updated to ${status}`,
@@ -471,34 +552,19 @@ const updateOrderStatus = async (req, res) => {
       updatedAt: new Date()
     });
 
-    // Update order status
     order.status = status;
     await order.save();
 
-    // ============================================
-    // 📧 SEND STATUS UPDATE EMAIL (ASYNC)
-    // ============================================
+    // Send email notification (async)
     try {
-      // Get user info for email
       const user = await User.findById(order.user);
-      
       if (user && user.email) {
-        // Send email asynchronously - don't await to not block response
-        emailService.sendOrderStatusUpdate(order, user, note)
-          .then(result => {
-            if (result.success) {
-              console.log(`✅ Status update email sent for order ${order.orderNumber}`);
-            } else {
-              console.error(`❌ Failed to send status update email:`, result.error);
-            }
-          })
-          .catch(err => {
-            console.error('❌ Status update email error:', err.message);
-          });
+        emailService.sendOrderStatusUpdate(order, user, note).catch(err => {
+          console.error('Status update email error:', err.message);
+        });
       }
     } catch (emailError) {
-      // Log but don't fail the status update if email fails
-      console.error('📧 Email sending error (non-blocking):', emailError.message);
+      console.error('Email error:', emailError.message);
     }
 
     res.json({
@@ -515,13 +581,12 @@ const updateOrderStatus = async (req, res) => {
   }
 };
 
-// @desc    Update payment status (admin/editor only)
+// @desc    Update payment status (admin/editor)
 // @route   PUT /api/orders/:id/payment
 // @access  Private/Admin/Editor
 const updatePaymentStatus = async (req, res) => {
   try {
-    const { paymentStatus, transactionId, mobileNumber, gatewayResponse, note } =
-      req.body;
+    const { paymentStatus, transactionId, mobileNumber, gatewayResponse, note } = req.body;
 
     const validStatuses = ["pending", "completed", "failed", "refunded"];
 
@@ -541,37 +606,21 @@ const updatePaymentStatus = async (req, res) => {
       });
     }
 
-    // Update payment details
     order.payment.status = paymentStatus;
+    if (transactionId) order.payment.transactionId = transactionId;
+    if (mobileNumber) order.payment.mobileNumber = mobileNumber;
+    if (gatewayResponse) order.payment.gatewayResponse = gatewayResponse;
 
-    if (transactionId) {
-      order.payment.transactionId = transactionId;
-    }
-
-    if (mobileNumber) {
-      order.payment.mobileNumber = mobileNumber;
-    }
-
-    if (gatewayResponse) {
-      order.payment.gatewayResponse = gatewayResponse;
-    }
-
-    // Set timestamps based on status
     if (paymentStatus === "completed" && order.payment.status !== "completed") {
       order.payment.completedAt = new Date();
-      
-      // Add to status history
       order.statusHistory.push({
         status: order.status,
         note: note || "Payment completed",
         updatedBy: req.user._id,
         updatedAt: new Date()
       });
-      
     } else if (paymentStatus === "refunded" && order.payment.status !== "refunded") {
       order.payment.refundedAt = new Date();
-      
-      // Add to status history
       order.statusHistory.push({
         status: order.status,
         note: note || "Payment refunded",
@@ -579,7 +628,6 @@ const updatePaymentStatus = async (req, res) => {
         updatedAt: new Date()
       });
 
-      // Restore stock for refunded orders if not already done
       if (order.status !== 'cancelled' && order.status !== 'refunded') {
         for (const item of order.items) {
           await Product.findByIdAndUpdate(item.product, {
@@ -590,21 +638,6 @@ const updatePaymentStatus = async (req, res) => {
     }
 
     await order.save();
-
-    // ============================================
-    // 📧 SEND PAYMENT UPDATE EMAIL (ASYNC)
-    // ============================================
-    try {
-      const user = await User.findById(order.user);
-      
-      if (user && user.email) {
-        const paymentMessage = `Payment status updated to ${paymentStatus}`;
-        emailService.sendOrderStatusUpdate(order, user, paymentMessage)
-          .catch(err => console.error('Payment update email error:', err.message));
-      }
-    } catch (emailError) {
-      console.error('Email sending error:', emailError.message);
-    }
 
     res.json({
       success: true,
@@ -620,7 +653,7 @@ const updatePaymentStatus = async (req, res) => {
   }
 };
 
-// @desc    Add tracking information (admin/editor only)
+// @desc    Add tracking information (admin/editor)
 // @route   PUT /api/orders/:id/tracking
 // @access  Private/Admin/Editor
 const addTrackingInfo = async (req, res) => {
@@ -638,16 +671,9 @@ const addTrackingInfo = async (req, res) => {
 
     order.trackingNumber = trackingNumber;
     order.carrier = carrier || order.carrier;
-    
-    if (trackingUrl) {
-      order.trackingUrl = trackingUrl;
-    }
-    
-    if (estimatedDelivery) {
-      order.estimatedDelivery = new Date(estimatedDelivery);
-    }
+    if (trackingUrl) order.trackingUrl = trackingUrl;
+    if (estimatedDelivery) order.estimatedDelivery = new Date(estimatedDelivery);
 
-    // Add to status history
     order.statusHistory.push({
       status: order.status,
       note: `Tracking info added: ${trackingNumber} (${carrier})`,
@@ -657,19 +683,16 @@ const addTrackingInfo = async (req, res) => {
 
     await order.save();
 
-    // ============================================
-    // 📧 SEND TRACKING UPDATE EMAIL (ASYNC)
-    // ============================================
+    // Send email notification (async)
     try {
       const user = await User.findById(order.user);
-      
       if (user && user.email) {
-        const trackingMessage = `Tracking number ${trackingNumber} added via ${carrier}`;
-        emailService.sendOrderStatusUpdate(order, user, trackingMessage)
-          .catch(err => console.error('Tracking update email error:', err.message));
+        emailService.sendOrderStatusUpdate(order, user, `Tracking number: ${trackingNumber}`).catch(err => {
+          console.error('Tracking email error:', err.message);
+        });
       }
     } catch (emailError) {
-      console.error('Email sending error:', emailError.message);
+      console.error('Email error:', emailError.message);
     }
 
     res.json({
@@ -686,90 +709,50 @@ const addTrackingInfo = async (req, res) => {
   }
 };
 
-// @desc    Get order tracking history
-// @route   GET /api/orders/:id/tracking
-// @access  Private
-const getOrderTracking = async (req, res) => {
+// @desc    Get order statistics (admin/editor)
+// @route   GET /api/orders/stats/dashboard
+// @access  Private/Admin/Editor
+const getOrderStats = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id)
-      .select('orderNumber status statusHistory trackingNumber carrier trackingUrl estimatedDelivery actualDelivery');
+    const totalOrders = await Order.countDocuments();
 
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
-    }
+    const stats = {
+      pending: await Order.countDocuments({ status: "pending" }),
+      confirmed: await Order.countDocuments({ status: "confirmed" }),
+      processing: await Order.countDocuments({ status: "processing" }),
+      shipped: await Order.countDocuments({ status: "shipped" }),
+      in_transit: await Order.countDocuments({ status: "in_transit" }),
+      out_for_delivery: await Order.countDocuments({ status: "out_for_delivery" }),
+      delivered: await Order.countDocuments({ status: "delivered" }),
+      cancelled: await Order.countDocuments({ status: "cancelled" }),
+      refunded: await Order.countDocuments({ status: "refunded" }),
+      on_hold: await Order.countDocuments({ status: "on_hold" }),
+    };
 
-    // Check authorization
-    const orderWithUser = await Order.findById(req.params.id).select('user');
-    if (orderWithUser.user.toString() !== req.user._id.toString() && 
-        req.user.role !== 'admin' && req.user.role !== 'editor') {
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized to view this order",
-      });
-    }
+    const paymentStats = {
+      paid: await Order.countDocuments({ "payment.status": "completed" }),
+      pending: await Order.countDocuments({ "payment.status": "pending" }),
+      failed: await Order.countDocuments({ "payment.status": "failed" }),
+    };
+
+    const revenueResult = await Order.aggregate([
+      { $match: { status: "delivered", "payment.status": "completed" } },
+      { $group: { _id: null, totalRevenue: { $sum: "$total" } } },
+    ]);
+
+    const totalRevenue = revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
 
     res.json({
       success: true,
-      tracking: {
-        orderNumber: order.orderNumber,
-        currentStatus: order.status,
-        trackingNumber: order.trackingNumber,
-        carrier: order.carrier,
-        trackingUrl: order.trackingUrl,
-        estimatedDelivery: order.estimatedDelivery,
-        actualDelivery: order.actualDelivery,
-        history: order.statusHistory.sort((a, b) => b.updatedAt - a.updatedAt)
-      }
-    });
-  } catch (error) {
-    console.error("Get order tracking error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-// @desc    Get payment details for an order
-// @route   GET /api/orders/:id/payment
-// @access  Private
-const getPaymentDetails = async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-      .select("orderNumber payment status user") // Make sure to select user field
-      .populate("user", "name email"); // Populate user to get the ID
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
-    }
-
-    // Check if order belongs to user or user is admin/editor
-    const isOwner = order.user && order.user._id.toString() === req.user._id.toString();
-    const isAdminOrEditor = req.user.role === "admin" || req.user.role === "editor";
-
-    if (!isOwner && !isAdminOrEditor) {
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized to view this order",
-      });
-    }
-
-    res.json({
-      success: true,
-      payment: order.payment || {
-        method: "Not set",
-        status: "pending",
-        transactionId: null,
+      stats: {
+        totalOrders,
+        byStatus: stats,
+        byPayment: paymentStats,
+        totalRevenue,
       },
     });
   } catch (error) {
-    console.error("Get payment details error:", error);
+    console.error("Get order stats error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -777,9 +760,9 @@ const getPaymentDetails = async (req, res) => {
   }
 };
 
-// @desc    Verify payment (for payment gateway webhook)
+// @desc    Verify payment webhook
 // @route   POST /api/orders/verify-payment
-// @access  Public (webhook)
+// @access  Public
 const verifyPayment = async (req, res) => {
   try {
     const { transactionId, orderNumber, status, gatewayResponse } = req.body;
@@ -793,7 +776,6 @@ const verifyPayment = async (req, res) => {
       });
     }
 
-    // Update payment status
     order.payment.status = status === "success" ? "completed" : "failed";
     order.payment.gatewayResponse = gatewayResponse;
 
@@ -801,8 +783,7 @@ const verifyPayment = async (req, res) => {
       order.payment.completedAt = new Date();
       order.status = "confirmed";
       order.confirmedAt = new Date();
-      
-      // Add to status history
+
       order.statusHistory.push({
         status: "confirmed",
         note: "Payment verified via webhook",
@@ -812,105 +793,12 @@ const verifyPayment = async (req, res) => {
 
     await order.save();
 
-    // ============================================
-    // 📧 SEND PAYMENT VERIFICATION EMAIL (ASYNC)
-    // ============================================
-    try {
-      const user = await User.findById(order.user);
-      
-      if (user && user.email) {
-        const verificationMessage = status === "success" 
-          ? "Your payment has been verified successfully!" 
-          : "Payment verification failed. Please contact support.";
-        
-        emailService.sendOrderStatusUpdate(order, user, verificationMessage)
-          .catch(err => console.error('Verification email error:', err.message));
-      }
-    } catch (emailError) {
-      console.error('Email sending error:', emailError.message);
-    }
-
     res.json({
       success: true,
       message: "Payment verified successfully",
-      order,
     });
   } catch (error) {
     console.error("Payment verification error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-// @desc    Get order statistics (admin/editor only)
-// @route   GET /api/orders/stats/dashboard
-// @access  Private/Admin/Editor
-const getOrderStats = async (req, res) => {
-  try {
-    const totalOrders = await Order.countDocuments();
-    
-    // Count by all statuses
-    const pendingOrders = await Order.countDocuments({ status: "pending" });
-    const confirmedOrders = await Order.countDocuments({ status: "confirmed" });
-    const processingOrders = await Order.countDocuments({ status: "processing" });
-    const shippedOrders = await Order.countDocuments({ status: "shipped" });
-    const inTransitOrders = await Order.countDocuments({ status: "in_transit" });
-    const outForDeliveryOrders = await Order.countDocuments({ status: "out_for_delivery" });
-    const deliveredOrders = await Order.countDocuments({ status: "delivered" });
-    const cancelledOrders = await Order.countDocuments({ status: "cancelled" });
-    const refundedOrders = await Order.countDocuments({ status: "refunded" });
-    const onHoldOrders = await Order.countDocuments({ status: "on_hold" });
-
-    const paidOrders = await Order.countDocuments({ "payment.status": "completed" });
-    const pendingPayment = await Order.countDocuments({ "payment.status": "pending" });
-    const failedPayments = await Order.countDocuments({ "payment.status": "failed" });
-
-    // Total revenue from delivered and paid orders
-    const revenueResult = await Order.aggregate([
-      {
-        $match: {
-          status: "delivered",
-          "payment.status": "completed",
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalRevenue: { $sum: "$total" },
-        },
-      },
-    ]);
-
-    const totalRevenue = revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
-
-    res.json({
-      success: true,
-      stats: {
-        totalOrders,
-        byStatus: {
-          pending: pendingOrders,
-          confirmed: confirmedOrders,
-          processing: processingOrders,
-          shipped: shippedOrders,
-          in_transit: inTransitOrders,
-          out_for_delivery: outForDeliveryOrders,
-          delivered: deliveredOrders,
-          cancelled: cancelledOrders,
-          refunded: refundedOrders,
-          on_hold: onHoldOrders,
-        },
-        byPayment: {
-          paid: paidOrders,
-          pending: pendingPayment,
-          failed: failedPayments,
-        },
-        totalRevenue,
-      },
-    });
-  } catch (error) {
-    console.error("Get order stats error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -933,8 +821,8 @@ const bulkUpdateOrderStatus = async (req, res) => {
     }
 
     const validStatuses = [
-      "pending", "confirmed", "processing", "shipped", 
-      "in_transit", "out_for_delivery", "delivered", 
+      "pending", "confirmed", "processing", "shipped",
+      "in_transit", "out_for_delivery", "delivered",
       "cancelled", "refunded", "on_hold"
     ];
 
@@ -947,7 +835,7 @@ const bulkUpdateOrderStatus = async (req, res) => {
 
     const result = await Order.updateMany(
       { _id: { $in: orderIds } },
-      { 
+      {
         $set: { status },
         $push: {
           statusHistory: {
@@ -959,9 +847,6 @@ const bulkUpdateOrderStatus = async (req, res) => {
         }
       }
     );
-
-    // Note: Bulk updates don't send individual emails to prevent spam
-    // You could implement a summary email for admin if needed
 
     res.json({
       success: true,
@@ -977,7 +862,6 @@ const bulkUpdateOrderStatus = async (req, res) => {
   }
 };
 
-// Export all functions
 module.exports = {
   // User functions
   createOrder,

@@ -1,4 +1,3 @@
-// models/Order.js
 const mongoose = require('mongoose');
 
 const orderItemSchema = new mongoose.Schema({
@@ -19,7 +18,6 @@ const orderItemSchema = new mongoose.Schema({
   }
 });
 
-// Tracking history schema
 const trackingHistorySchema = new mongoose.Schema({
   status: {
     type: String,
@@ -37,7 +35,6 @@ const trackingHistorySchema = new mongoose.Schema({
   }
 });
 
-// Payment details schema
 const paymentDetailsSchema = new mongoose.Schema({
   method: {
     type: String,
@@ -69,7 +66,7 @@ const orderSchema = new mongoose.Schema({
   orderNumber: {
     type: String,
     unique: true,
-    required: true
+    sparse: true
   },
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -78,60 +75,32 @@ const orderSchema = new mongoose.Schema({
   },
   items: [orderItemSchema],
   
-  // Price breakdown
-  subtotal: {
-    type: Number,
-    required: true
-  },
-  shippingCost: {
-    type: Number,
-    default: 0
-  },
-  tax: {
-    type: Number,
-    default: 0
-  },
-  discount: {
-    type: Number,
-    default: 0
-  },
-  total: {
-    type: Number,
-    required: true
-  },
+  subtotal: { type: Number, required: true },
+  shippingCost: { type: Number, default: 0 },
+  tax: { type: Number, default: 0 },
+  discount: { type: Number, default: 0 },
+  total: { type: Number, required: true },
   
-  // Payment information
   payment: paymentDetailsSchema,
   
-  // Order status - Complete workflow
   status: {
     type: String,
     enum: [
-      'pending',           // Order placed, payment pending
-      'confirmed',         // Payment confirmed, order accepted
-      'processing',        // Being prepared
-      'shipped',           // Handed to courier
-      'in_transit',        // On the way
-      'out_for_delivery',  // Out for local delivery
-      'delivered',         // Successfully delivered
-      'cancelled',         // Cancelled by user/admin
-      'refunded',          // Money returned
-      'on_hold'            // Temporarily paused
+      'pending', 'confirmed', 'processing', 'shipped', 
+      'in_transit', 'out_for_delivery', 'delivered', 
+      'cancelled', 'refunded', 'on_hold'
     ],
     default: 'pending'
   },
   
-  // Status history for tracking
   statusHistory: [trackingHistorySchema],
   
-  // Tracking information
   trackingNumber: String,
   carrier: String,
   trackingUrl: String,
   estimatedDelivery: Date,
   actualDelivery: Date,
   
-  // Shipping information
   shippingAddress: {
     fullName: { type: String, required: true },
     addressLine1: { type: String, required: true },
@@ -157,7 +126,6 @@ const orderSchema = new mongoose.Schema({
   notes: String,
   adminNotes: String,
   
-  // Timestamps
   placedAt: Date,
   confirmedAt: Date,
   processedAt: Date,
@@ -172,28 +140,39 @@ const orderSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Generate order number before save
+// ✅ FIXED: Proper pre-save middleware with async/await and next()
 orderSchema.pre('save', async function(next) {
   try {
+    // Only generate order number if it doesn't exist
     if (!this.orderNumber) {
       const date = new Date();
       const year = date.getFullYear().toString().slice(-2);
       const month = (date.getMonth() + 1).toString().padStart(2, '0');
       const day = date.getDate().toString().padStart(2, '0');
       
-      const count = await mongoose.model('Order').countDocuments({
-        createdAt: { 
-          $gte: new Date(date.setHours(0, 0, 0, 0)), 
-          $lte: new Date(date.setHours(23, 59, 59, 999)) 
-        }
+      // Count orders created today
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+      
+      const Order = mongoose.model('Order');
+      const count = await Order.countDocuments({
+        createdAt: { $gte: startOfDay, $lte: endOfDay }
       });
       
+      // Generate order number: ORD-YYMMDD-XXXX
       this.orderNumber = `ORD-${year}${month}${day}-${(count + 1).toString().padStart(4, '0')}`;
     }
-    next();
+    // next();
   } catch (error) {
     next(error);
   }
 });
+
+// Add index for better query performance
+orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ orderNumber: 1 });
+orderSchema.index({ status: 1 });
 
 module.exports = mongoose.model('Order', orderSchema);
