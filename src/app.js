@@ -196,6 +196,12 @@ app.use("/api/settings", siteSettingRoutes);
 // Compare routes
 app.use("/api/compare", compareRoutes);
 
+// Add this temporary test route
+app.get('/test-route', (req, res) => {
+  res.json({ success: true, message: 'Test route working' });
+});
+
+
 /**
  * ====================================
  * API Root - List all available API endpoints

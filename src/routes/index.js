@@ -126,14 +126,68 @@ router.get('/', (req, res) => {
             <div class="endpoints-section">
                 <div class="section-title">🔗 API Endpoints</div>
                 <div class="endpoint-grid">
-                    <div class="endpoint-item"><span class="endpoint-method method-get">GET</span><span class="endpoint-path">/api/products</span><div class="endpoint-desc">Get all products with pagination</div></div>
-                    <div class="endpoint-item"><span class="endpoint-method method-get">GET</span><span class="endpoint-path">/api/products/:id</span><div class="endpoint-desc">Get single product by ID</div></div>
-                    <div class="endpoint-item"><span class="endpoint-method method-get">GET</span><span class="endpoint-path">/api/categories</span><div class="endpoint-desc">Get all categories</div></div>
-                    <div class="endpoint-item"><span class="endpoint-method method-post">POST</span><span class="endpoint-path">/api/auth/register</span><div class="endpoint-desc">Register new user</div></div>
-                    <div class="endpoint-item"><span class="endpoint-method method-post">POST</span><span class="endpoint-path">/api/auth/login</span><div class="endpoint-desc">User login</div></div>
-                    <div class="endpoint-item"><span class="endpoint-method method-get">GET</span><span class="endpoint-path">/api/orders</span><div class="endpoint-desc">Get user orders</div></div>
-                    <div class="endpoint-item"><span class="endpoint-method method-post">POST</span><span class="endpoint-path">/api/orders</span><div class="endpoint-desc">Create new order</div></div>
-                    <div class="endpoint-item"><span class="endpoint-method method-get">GET</span><span class="endpoint-path">/health</span><div class="endpoint-desc">Health check endpoint</div></div>
+                    <div class="endpoint-item">
+                        <a href="https://gamersbd-server.onrender.com/api/products" target="_blank">
+                            <span class="endpoint-method method-get">GET</span>
+                            <span class="endpoint-path">https://gamersbd-server.onrender.com/api/products</span>
+                            <div class="endpoint-desc">Get all products with pagination</div>
+                        </a>
+                    </div>
+                    <div class="endpoint-item">
+                        <a href="https://gamersbd-server.onrender.com/api/products/:id" target="_blank">
+                            <span class="endpoint-method method-get">GET</span>
+                            <span class="endpoint-path">https://gamersbd-server.onrender.com/api/products/:id</span>
+                            <div class="endpoint-desc">Get single product by ID</div>
+                        </a>
+                    </div>
+                    <div class="endpoint-item">
+                        <a href="https://gamersbd-server.onrender.com/api/categories" target="_blank">
+                            <span class="endpoint-method method-get">GET</span>
+                            <span class="endpoint-path">https://gamersbd-server.onrender.com/api/categories</span>
+                            <div class="endpoint-desc">Get all categories</div>
+                        </a>
+                    </div>
+                    <div class="endpoint-item">
+                        <span class="endpoint-method method-get">GET</span><span
+                            class="endpoint-path">https://gamersbd-server.onrender.com/api/categories</span>
+                        <div class="endpoint-desc">Get all categories</div>
+                        </a></a>
+                    </div>
+                    <div class="endpoint-item">
+                        <a href="https://gamersbd-server.onrender.com/api/auth/register" target="_blank">
+                            <span class="endpoint-method method-post">POST</span><span
+                                class="endpoint-path">https://gamersbd-server.onrender.com/api/auth/register</span>
+                            <div class="endpoint-desc">Register new user</div>
+                        </a>
+                    </div>
+                    <div class="endpoint-item">
+                        <a href="https://gamersbd-server.onrender.com/api/auth/login" target="_blank">
+                            <span class="endpoint-method method-post">POST</span>
+                            <span class="endpoint-path">https://gamersbd-server.onrender.com/api/auth/login</span>
+                            <div class="endpoint-desc">User login</div>
+                        </a>
+                    </div>
+                    <div class="endpoint-item">
+                        <a href="https://gamersbd-server.onrender.com/api/orders" target="_blank">
+                            <span class="endpoint-method method-get">GET</span>
+                            <span class="endpoint-path">https://gamersbd-server.onrender.com/api/orders</span>
+                            <div class="endpoint-desc">Get user orders</div>
+                        </a>
+                    </div>
+                    <div class="endpoint-item">
+                        <a href="https://gamersbd-server.onrender.com/api/orders" target="_blank">
+                            <span class="endpoint-method method-post">POST</span>
+                            <span class="endpoint-path">https://gamersbd-server.onrender.com/api/orders</span>
+                            <div class="endpoint-desc">Create new order</div>
+                        </a>
+                    </div>
+                    <div class="endpoint-item">
+                        <a href="https://gamersbd-server.onrender.com/health" target="_blank">
+                            <span class="endpoint-method method-get">GET</span>
+                            <span class="endpoint-path">https://gamersbd-server.onrender.com/health</span>
+                            <div class="endpoint-desc">Health check endpoint</div>
+                        </a>
+                    </div>
                 </div>
             </div>
 

@@ -1,11 +1,14 @@
-const router = require('express').Router()
+const express = require('express');
+const router = express.Router();
 
+// GET /api/health
 router.get('/', (req, res) => {
-  res.json({
-    status: 'ok',
-    uptime: process.uptime(),
-    timestamp: new Date()
-  })
-})
+  res.status(200).json({
+    success: true,
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
 
-module.exports = router
+module.exports = router;

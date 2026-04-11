@@ -1,81 +1,60 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
-const userSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      required: [true, 'Name is required'],
-      trim: true
-    },
-    firstName: {
-      type: String,
-      default: ''
-    },
-    lastName: {
-      type: String,
-      default: ''
-    },
-    email: {
-      type: String,
-      required: [true, 'Email is required'],
-      unique: true,
-      lowercase: true,
-      trim: true,
-      match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
-    },
-    password: {
-      type: String,
-      required: [true, 'Password is required'],
-      minlength: [6, 'Password must be at least 6 characters'],
-      select: false
-    },
-    role: {
-      type: String,
-      enum: ['user', 'admin', 'moderator'],
-      default: 'user'
-    },
-    phone: {
-      type: String,
-      default: ''
-    },
-    bio: {
-      type: String,
-      default: '',
-      maxlength: [500, 'Bio cannot exceed 500 characters']
-    },
-    avatar: {
-      type: String,
-      default: null
-    },
-    address: {
-      country: { type: String, default: '' },
-      city: { type: String, default: '' },
-      state: { type: String, default: '' },
-      postalCode: { type: String, default: '' },
-      taxId: { type: String, default: '' }
-    },
-    social: {
-      facebook: { type: String, default: '' },
-      twitter: { type: String, default: '' },
-      linkedin: { type: String, default: '' },
-      instagram: { type: String, default: '' }
-    }
+const userSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'Please add a name'],
+    trim: true
   },
-  {
-    timestamps: true
-  }
-);
+  email: {
+    type: String,
+    required: [true, 'Please add an email'],
+    unique: true,
+    lowercase: true,
+    trim: true
+  },
+  password: {
+    type: String,
+    required: [true, 'Please add a password'],
+    minlength: 6,
+    select: false
+  },
+  role: {
+    type: String,
+    enum: ['user', 'admin', 'editor'],
+    default: 'user'
+  },
+  firstName: { type: String, default: '' },
+  lastName: { type: String, default: '' },
+  phone: { type: String, default: '' },
+  bio: { type: String, default: '' },
+  avatar: { type: String, default: null }
+}, {
+  timestamps: true
+});
 
-// Hash password before saving
-userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) {
-    next();
+// ====================================
+// ALTERNATIVE: Pre-save middleware using function() without relying on next
+// ====================================
+userSchema.pre('save', function() {
+  const user = this;
+  
+  if (!user.isModified('password')) {
+    return;
   }
   
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
-  next();
+  return bcrypt.genSalt(10)
+    .then(salt => {
+      return bcrypt.hash(user.password, salt);
+    })
+    .then(hash => {
+      user.password = hash;
+    })
+    .catch(err => {
+      console.error('Password hashing error:', err);
+      throw err;
+    });
 });
 
 // Compare password method

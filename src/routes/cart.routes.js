@@ -14,6 +14,23 @@ const { protect } = require("../middleware/auth.middleware");
 
 console.log("🛒 Initializing cart routes...");
 
+
+const authMiddleware = (req, res, next) => {
+  const token = req.headers.authorization;
+  if (!token) {
+    return res.status(401).json({ success: false, error: 'No token provided' });
+  }
+  // If authenticated, call next()
+  next(); // IMPORTANT: Must call next()
+};
+
+// GET /api/cart - Protected route
+router.get('/', authMiddleware, (req, res) => {
+  res.json({ success: true, cart: [] });
+});
+
+module.exports = router;
+
 // Public test route (no auth required)
 router.get("/test", testCart);
 
