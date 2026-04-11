@@ -1,71 +1,56 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
+/* =========================
+   GENERATE JWT TOKEN
+========================= */
 const generateToken = (id, role) => {
   return jwt.sign({ id, role }, process.env.JWT_SECRET, {
     expiresIn: '30d'
   });
 };
 
-// REGISTER - No next parameter
+/* =========================
+   REGISTER
+========================= */
 const register = async (req, res) => {
   try {
-    const { name, email, password, role, adminSecret } = req.body;
+    const { name, email, password } = req.body;
 
-    console.log('📝 Registration attempt:', { name, email });
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email and password are required'
+      });
+    }
 
-    // Check if user exists
-    const userExists = await User.findOne({ email });
-    if (userExists) {
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters'
+      });
+    }
+
+    const exists = await User.findOne({ email });
+    if (exists) {
       return res.status(400).json({
         success: false,
         message: 'User already exists'
       });
     }
 
-    // Split name for firstName/lastName
+    // Split name
     const nameParts = name.split(' ');
     const firstName = nameParts[0] || '';
     const lastName = nameParts.slice(1).join(' ') || '';
 
-    // Determine user role
-    let userRole = 'user';
-    if (role === 'admin' && adminSecret === process.env.ADMIN_SECRET) {
-      userRole = 'admin';
-    }
-
-    // Create user with all fields
     const user = await User.create({
       name,
       email,
       password,
-      role: userRole,
       firstName,
-      lastName,
-      phone: '',
-      bio: '',
-      avatar: null,
-      address: {
-        street: '',
-        city: '',
-        state: '',
-        postalCode: '',
-        country: 'Bangladesh'
-      },
-      preferences: {
-        newsletter: false,
-        emailNotifications: true,
-        language: 'en',
-        currency: 'BDT',
-        theme: 'dark'
-      },
-      stats: {
-        totalOrders: 0,
-        totalSpent: 0,
-        reviewsWritten: 0,
-        wishlistCount: 0,
-        loginCount: 0
-      }
+      lastName
     });
 
     const token = generateToken(user._id, user.role);
@@ -78,17 +63,11 @@ const register = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        phone: user.phone,
-        bio: user.bio,
-        avatar: user.avatar,
-        createdAt: user.createdAt,
         token
       }
     });
+
   } catch (error) {
-    console.error('Registration error:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -96,17 +75,17 @@ const register = async (req, res) => {
   }
 };
 
-// LOGIN - No next parameter
+/* =========================
+   LOGIN
+========================= */
 const login = async (req, res) => {
   try {
-    console.log('🔐 Login attempt:', req.body.email);
-
     const { email, password } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide email and password'
+        message: 'Email and password required'
       });
     }
 
@@ -115,20 +94,25 @@ const login = async (req, res) => {
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid email or password'
+        message: 'Invalid credentials'
       });
     }
 
-    const isPasswordMatch = await user.comparePassword(password);
+    const isMatch = await user.comparePassword(password);
 
-    if (!isPasswordMatch) {
+    if (!isMatch) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid email or password'
+        message: 'Invalid credentials'
       });
     }
 
     const token = generateToken(user._id, user.role);
+
+    await user.updateLoginStats({
+      token,
+      device: req.headers['user-agent'] || 'Unknown'
+    });
 
     res.status(200).json({
       success: true,
@@ -141,8 +125,8 @@ const login = async (req, res) => {
         token
       }
     });
+
   } catch (error) {
-    console.error('❌ Login error:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -150,13 +134,25 @@ const login = async (req, res) => {
   }
 };
 
+/* =========================
+   GET PROFILE
+========================= */
 const getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password');
-    res.status(200).json({
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
       success: true,
       data: user
     });
+
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -165,46 +161,238 @@ const getProfile = async (req, res) => {
   }
 };
 
-// In your auth.controller.js
+/* =========================
+   UPDATE PROFILE
+========================= */
 const updateProfile = async (req, res) => {
   try {
-    const { avatar, firstName, lastName, phone, bio } = req.body;
-
     const user = await User.findById(req.user._id);
 
-    // Handle base64 avatar
-    if (avatar) {
-      // Validate base64 format
-      const isValid = /^data:image\/(jpeg|png|jpg|gif|webp);base64,/.test(avatar);
-      if (!isValid) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid image format. Please provide a valid base64 image.'
-        });
-      }
-
-      // Check size (approx 5MB max)
-      const base64Size = Buffer.from(avatar.split(',')[1], 'base64').length;
-      if (base64Size > 5 * 1024 * 1024) {
-        return res.status(400).json({
-          success: false,
-          message: 'Image too large. Maximum 5MB allowed.'
-        });
-      }
-
-      user.avatar = avatar;
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
     }
 
-    if (firstName) user.firstName = firstName;
-    if (lastName) user.lastName = lastName;
-    if (phone) user.phone = phone;
-    if (bio) user.bio = bio;
+    const fields = [
+      'firstName',
+      'lastName',
+      'phone',
+      'bio',
+      'avatar',
+      'gender'
+    ];
+
+    fields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        user[field] = req.body[field];
+      }
+    });
+
+    if (req.body.address) {
+      user.address = { ...user.address, ...req.body.address };
+    }
+
+    if (req.body.social) {
+      user.social = { ...user.social, ...req.body.social };
+    }
+
+    // Update full name
+    if (req.body.firstName || req.body.lastName) {
+      user.name = `${user.firstName} ${user.lastName}`.trim();
+    }
 
     await user.save();
 
-    res.status(200).json({
+    res.json({
       success: true,
-      message: 'Profile updated successfully',
+      message: 'Profile updated',
+      data: user
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/* =========================
+   CHANGE PASSWORD
+========================= */
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password and new password are required'
+      });
+    }
+
+    const user = await User.findById(req.user._id).select('+password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    if (!(await user.comparePassword(currentPassword))) {
+      return res.status(401).json({
+        success: false,
+        message: 'Current password incorrect'
+      });
+    }
+
+    user.password = newPassword;
+    user.lastPasswordChange = Date.now();
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Password updated successfully'
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/* =========================
+   FORGOT PASSWORD
+========================= */
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found with this email'
+      });
+    }
+
+    const resetToken = user.generatePasswordResetToken();
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Password reset token generated',
+      resetToken // ⚠️ In production, send this via email instead
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/* =========================
+   RESET PASSWORD
+========================= */
+const resetPassword = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token and new password are required'
+      });
+    }
+
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    const user = await User.findOne({
+      passwordResetToken: hashedToken,
+      passwordResetExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired token'
+      });
+    }
+
+    user.password = newPassword;
+    user.passwordResetToken = null;
+    user.passwordResetExpires = null;
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Password reset successful'
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/* =========================
+   GET ALL USERS (ADMIN)
+========================= */
+const getUsers = async (req, res) => {
+  try {
+    const users = await User.find().select('-password');
+    
+    res.json({
+      success: true,
+      count: users.length,
+      data: users
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/* =========================
+   GET USER BY ID (ADMIN)
+========================= */
+const getUserById = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+    
+    res.json({
+      success: true,
       data: user
     });
   } catch (error) {
@@ -215,20 +403,84 @@ const updateProfile = async (req, res) => {
   }
 };
 
-const getUsers = async (req, res) => {
-  res.json({ success: true, message: 'Get users endpoint' });
-};
-
-const getUserById = async (req, res) => {
-  res.json({ success: true, message: 'Get user by ID endpoint' });
-};
-
+/* =========================
+   UPDATE USER (ADMIN)
+========================= */
 const updateUser = async (req, res) => {
-  res.json({ success: true, message: 'Update user endpoint' });
+  try {
+    const user = await User.findById(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+    
+    // Fields that admin can update
+    const allowedUpdates = [
+      'name', 'email', 'role', 'status', 
+      'firstName', 'lastName', 'phone', 'bio',
+      'gender', 'emailVerified'
+    ];
+    
+    allowedUpdates.forEach(field => {
+      if (req.body[field] !== undefined) {
+        user[field] = req.body[field];
+      }
+    });
+    
+    // Update address if provided
+    if (req.body.address) {
+      user.address = { ...user.address, ...req.body.address };
+    }
+    
+    // Update preferences if provided
+    if (req.body.preferences) {
+      user.preferences = { ...user.preferences, ...req.body.preferences };
+    }
+    
+    await user.save();
+    
+    res.json({
+      success: true,
+      message: 'User updated successfully',
+      data: user
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
 };
 
+/* =========================
+   DELETE USER (ADMIN)
+========================= */
 const deleteUser = async (req, res) => {
-  res.json({ success: true, message: 'Delete user endpoint' });
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    await user.deleteOne();
+
+    res.json({
+      success: true,
+      message: 'User deleted successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
 };
 
 module.exports = {
@@ -236,6 +488,9 @@ module.exports = {
   login,
   getProfile,
   updateProfile,
+  changePassword,
+  forgotPassword,
+  resetPassword,
   getUsers,
   getUserById,
   updateUser,

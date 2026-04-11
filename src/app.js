@@ -201,7 +201,6 @@ app.get('/test-route', (req, res) => {
   res.json({ success: true, message: 'Test route working' });
 });
 
-
 /**
  * ====================================
  * API Root - List all available API endpoints
@@ -226,9 +225,10 @@ app.get("/api", (req, res) => {
         endpoints: {
           register: { url: "/register", method: "POST", auth: false },
           login: { url: "/login", method: "POST", auth: false },
-          logout: { url: "/logout", method: "POST", auth: true },
           profile: { url: "/profile", method: "GET", auth: true },
-          "refresh-token": { url: "/refresh-token", method: "POST", auth: true },
+          "change-password": { url: "/change-password", method: "PUT", auth: true },
+          "forgot-password": { url: "/forgot-password", method: "POST", auth: false },
+          "reset-password": { url: "/reset-password", method: "POST", auth: false },
         },
       },
       products: {
