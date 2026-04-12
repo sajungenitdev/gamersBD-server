@@ -133,7 +133,7 @@ blogSchema.pre("save", function (next) {
   if (this.isModified("comments")) {
     this.commentCount = this.comments.length;
   }
-  next();
+  // next();
 });
 
 // Indexes for search
