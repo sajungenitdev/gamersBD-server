@@ -17,6 +17,10 @@ const {
   verifyPayment,
   bulkUpdateOrderStatus
 } = require('../controllers/order.controller');
+const {
+  downloadInvoice,
+  previewInvoice
+} = require('../controllers/invoice.controller');
 
 // All order routes require authentication
 router.use(protect);
@@ -36,6 +40,9 @@ router.put('/bulk-status', authorize('admin'), bulkUpdateOrderStatus);
 router.put('/:id/status', authorize('admin', 'editor'), updateOrderStatus);
 router.put('/:id/payment', authorize('admin', 'editor'), updatePaymentStatus);
 router.put('/:id/tracking', authorize('admin', 'editor'), addTrackingInfo);
+
+router.get('/:orderId/invoice', protect, downloadInvoice);
+router.get('/:orderId/invoice/preview', protect, previewInvoice);
 
 // Public webhook (no auth)
 router.post('/verify-payment', verifyPayment);
