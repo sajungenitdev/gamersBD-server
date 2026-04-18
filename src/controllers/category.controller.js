@@ -1,15 +1,21 @@
 // controllers/category.controller.js
 const Category = require("../models/Category");
+const NodeCache = require('node-cache');
+
+// Initialize cache with 5 minutes TTL
+const categoryCache = new NodeCache({ 
+  stdTTL: 300, // 5 minutes
+  checkperiod: 60, // Check for expired keys every 60 seconds
+  useClones: false // Better performance
+});
 
 // Helper function to validate and process Base64 image
 const processBase64Image = (base64String) => {
   if (!base64String) return null;
   
-  // Check if it's a Base64 string
   const base64Regex = /^data:image\/(jpeg|jpg|png|webp|gif|bmp);base64,/;
   
   if (base64Regex.test(base64String)) {
-    // Validate size (max 2MB for Base64)
     const base64Data = base64String.split(',')[1];
     const base64Size = Buffer.from(base64Data, 'base64').length;
     if (base64Size > 2 * 1024 * 1024) {
@@ -18,7 +24,6 @@ const processBase64Image = (base64String) => {
     return base64String;
   }
   
-  // If it's a URL, return as is
   if (base64String && (base64String.startsWith('http') || base64String.startsWith('/uploads'))) {
     return base64String;
   }
@@ -26,30 +31,66 @@ const processBase64Image = (base64String) => {
   return null;
 };
 
-// Helper function to validate image
-const isValidImage = (imageData) => {
-  if (!imageData) return true;
-  
-  // Check if it's a valid URL or Base64
-  const urlPattern = /^https?:\/\/.+\.(jpg|jpeg|png|webp|gif|bmp|svg)$/i;
-  const base64Pattern = /^data:image\/(jpeg|jpg|png|webp|gif|bmp);base64,/;
-  
-  return urlPattern.test(imageData) || base64Pattern.test(imageData);
+// Helper function to generate cache key
+const getCacheKey = (prefix, params = {}) => {
+  return `${prefix}_${JSON.stringify(params)}`;
 };
 
-// Get all categories
+// OPTIMIZED: Get all categories with caching
 const getCategories = async (req, res) => {
   try {
-    const categories = await Category.find()
-      .populate("parent", "name slug image")
-      .sort("order name");
-
+    const cacheKey = 'all_categories';
+    
+    // Check cache first
+    let cachedData = categoryCache.get(cacheKey);
+    if (cachedData) {
+      console.log('✅ Returning cached categories');
+      res.set('X-Cache', 'HIT');
+      res.set('Cache-Control', 'public, max-age=300');
+      return res.status(200).json({
+        success: true,
+        count: cachedData.length,
+        data: cachedData,
+        cached: true
+      });
+    }
+    
+    console.log('📡 Fetching categories from database...');
+    
+    // Optimized query - select only needed fields, use lean() for better performance
+    const categories = await Category.find(
+      // { isActive: true },
+      {},
+      '_id name description image parent level order slug imageAlt icon'
+    )
+    .lean() // Returns plain JavaScript objects, not Mongoose documents
+    .sort({ level: 1, order: 1, name: 1 })
+    .maxTimeMS(5000); // 5 second timeout
+    
+    if (!categories || categories.length === 0) {
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        data: []
+      });
+    }
+    
+    // Store in cache
+    categoryCache.set(cacheKey, categories);
+    console.log(`✅ Cached ${categories.length} categories`);
+    
+    // Set cache headers for CDN/browser
+    res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=60');
+    res.set('X-Cache', 'MISS');
+    res.set('X-Response-Time', Date.now());
+    
     res.status(200).json({
       success: true,
       count: categories.length,
       data: categories,
     });
   } catch (error) {
+    console.error('Error in getCategories:', error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -57,26 +98,155 @@ const getCategories = async (req, res) => {
   }
 };
 
-// Get single category by ID
+// OPTIMIZED: Get category tree with single query and in-memory tree building
+const getCategoryTree = async (req, res) => {
+  try {
+    const cacheKey = 'category_tree';
+    
+    // Check cache
+    let cachedData = categoryCache.get(cacheKey);
+    if (cachedData) {
+      console.log('✅ Returning cached category tree');
+      res.set('X-Cache', 'HIT');
+      res.set('Cache-Control', 'public, max-age=600');
+      return res.status(200).json({
+        success: true,
+        data: cachedData,
+        cached: true
+      });
+    }
+    
+    console.log('🌲 Building category tree from database...');
+    
+    // Get ALL active categories in a single query (no N+1 problem)
+    const allCategories = await Category.find(
+      // { isActive: true }, 
+      {},
+      '_id name slug description image imageAlt icon level order parent'
+    )
+    .lean()
+    .sort({ order: 1, name: 1 })
+    .maxTimeMS(5000);
+    
+    if (!allCategories || allCategories.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: []
+      });
+    }
+    
+    // Build tree in memory - O(n) complexity
+    const categoryMap = new Map();
+    const roots = [];
+    
+    // First pass: create map of all categories
+    allCategories.forEach(cat => {
+      categoryMap.set(cat._id.toString(), { 
+        ...cat, 
+        subcategories: [],
+        children: [] // Alias for subcategories
+      });
+    });
+    
+    // Second pass: build hierarchy
+    allCategories.forEach(cat => {
+      const node = categoryMap.get(cat._id.toString());
+      if (cat.parent && categoryMap.has(cat.parent.toString())) {
+        const parent = categoryMap.get(cat.parent.toString());
+        parent.subcategories.push(node);
+        parent.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    });
+    
+    // Sort subcategories by order and name
+    const sortSubcategories = (items) => {
+      items.sort((a, b) => {
+        if (a.order !== b.order) return a.order - b.order;
+        return a.name.localeCompare(b.name);
+      });
+      items.forEach(item => {
+        if (item.subcategories && item.subcategories.length > 0) {
+          sortSubcategories(item.subcategories);
+        }
+      });
+    };
+    
+    sortSubcategories(roots);
+    
+    // Cache the result
+    categoryCache.set(cacheKey, roots);
+    console.log(`✅ Cached category tree with ${roots.length} root categories`);
+    
+    // Set cache headers (longer TTL for tree)
+    res.set('Cache-Control', 'public, max-age=600, stale-while-revalidate=120');
+    res.set('X-Cache', 'MISS');
+    
+    res.status(200).json({
+      success: true,
+      data: roots,
+    });
+  } catch (error) {
+    console.error('Error in getCategoryTree:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+// OPTIMIZED: Get single category by ID
 const getCategoryById = async (req, res) => {
   try {
-    const category = await Category.findById(req.params.id).populate(
-      "parent",
-      "name slug image",
-    );
-
+    const { id } = req.params;
+    const cacheKey = getCacheKey('category', { id });
+    
+    // Check cache
+    let cachedData = categoryCache.get(cacheKey);
+    if (cachedData) {
+      res.set('X-Cache', 'HIT');
+      return res.status(200).json({
+        success: true,
+        data: cachedData,
+        cached: true
+      });
+    }
+    
+    const category = await Category.findById(id)
+      .select('_id name slug description image imageAlt icon parent level order isActive metaTitle metaDescription')
+      .lean()
+      .maxTimeMS(3000);
+    
     if (!category) {
       return res.status(404).json({
         success: false,
         message: "Category not found",
       });
     }
-
+    
+    // Get subcategories if needed
+    const subcategories = await Category.find(
+      { parent: id, isActive: true },
+      '_id name slug description image level order'
+    )
+    .lean()
+    .sort({ order: 1, name: 1 });
+    
+    const result = {
+      ...category,
+      subcategories
+    };
+    
+    categoryCache.set(cacheKey, result);
+    res.set('Cache-Control', 'public, max-age=300');
+    
     res.status(200).json({
       success: true,
-      data: category,
+      data: result,
     });
   } catch (error) {
+    console.error('Error in getCategoryById:', error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -84,47 +254,70 @@ const getCategoryById = async (req, res) => {
   }
 };
 
-// Get category by slug
+// OPTIMIZED: Get category by slug
 const getCategoryBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
-
-    // First try to find by slug
-    let category = await Category.findOne({ slug }).populate(
-      "parent",
-      "name slug image",
-    );
-
-    // If not found by slug, try to find by name (for backward compatibility)
+    const cacheKey = getCacheKey('category_slug', { slug });
+    
+    // Check cache
+    let cachedData = categoryCache.get(cacheKey);
+    if (cachedData) {
+      res.set('X-Cache', 'HIT');
+      return res.status(200).json({
+        success: true,
+        data: cachedData,
+        cached: true
+      });
+    }
+    
+    // Try to find by slug first
+    let category = await Category.findOne({ slug, isActive: true })
+      .select('_id name slug description image imageAlt icon parent level order metaTitle metaDescription')
+      .lean()
+      .maxTimeMS(3000);
+    
+    // If not found by slug, try by name (backward compatibility)
     if (!category) {
       const decodedSlug = decodeURIComponent(slug).replace(/-/g, " ");
       category = await Category.findOne({
         name: { $regex: new RegExp(`^${decodedSlug}$`, "i") },
-      }).populate("parent", "name slug image");
+        isActive: true
+      })
+      .select('_id name slug description image imageAlt icon parent level order metaTitle metaDescription')
+      .lean();
     }
-
+    
     if (!category) {
       return res.status(404).json({
         success: false,
         message: "Category not found",
       });
     }
-
+    
     // Get subcategories
-    const subcategories = await Category.find({ parent: category._id })
-      .select(
-        "_id name slug description image imageAlt icon level order featured",
-      )
-      .sort("order name");
-
+    const subcategories = await Category.find({ 
+      parent: category._id, 
+      isActive: true 
+    })
+    .select('_id name slug description image icon level order')
+    .lean()
+    .sort({ order: 1, name: 1 });
+    
+    const result = {
+      ...category,
+      subcategories,
+    };
+    
+    categoryCache.set(cacheKey, result);
+    res.set('Cache-Control', 'public, max-age=300');
+    
     res.status(200).json({
       success: true,
-      data: {
-        ...category.toObject(),
-        subcategories,
-      },
+      data: result,
     });
   } catch (error) {
+    console.error('Error in getCategoryBySlug:', error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -132,39 +325,61 @@ const getCategoryBySlug = async (req, res) => {
   }
 };
 
-// Get subcategories of a category
+// OPTIMIZED: Get subcategories with parallel queries
 const getSubcategories = async (req, res) => {
   try {
     const { id } = req.params;
-
-    console.log("Getting subcategories for category ID:", id);
-
-    // Find category by ID
-    const category = await Category.findById(id);
-
+    const cacheKey = getCacheKey('subcategories', { id });
+    
+    // Check cache
+    let cachedData = categoryCache.get(cacheKey);
+    if (cachedData) {
+      return res.json({
+        success: true,
+        data: cachedData.subcategories,
+        count: cachedData.count,
+        parentCategory: cachedData.parentCategory,
+        cached: true
+      });
+    }
+    
+    // Run queries in parallel for better performance
+    const [category, subcategories] = await Promise.all([
+      Category.findById(id)
+        .select('_id name slug description image')
+        .lean()
+        .maxTimeMS(3000),
+      Category.find({ parent: id, isActive: true })
+        .select('_id name slug description image level order')
+        .lean()
+        .sort({ order: 1, name: 1 })
+        .maxTimeMS(3000)
+    ]);
+    
     if (!category) {
       return res.status(404).json({
         success: false,
         message: "Category not found",
       });
     }
-
-    // Get subcategories (categories that have this category as parent)
-    const subcategories = await Category.find({
-      parent: id,
-    }).select("_id name slug description image level");
-
-    console.log(`Found ${subcategories.length} subcategories`);
-
-    res.json({
-      success: true,
-      data: subcategories,
+    
+    const result = {
+      subcategories,
       count: subcategories.length,
       parentCategory: {
         id: category._id,
         name: category.name,
         slug: category.slug,
-      },
+      }
+    };
+    
+    categoryCache.set(cacheKey, result);
+    
+    res.json({
+      success: true,
+      data: subcategories,
+      count: subcategories.length,
+      parentCategory: result.parentCategory,
     });
   } catch (error) {
     console.error("Error in getSubcategories:", error);
@@ -175,78 +390,99 @@ const getSubcategories = async (req, res) => {
   }
 };
 
-// Get subcategory by slugs
+// OPTIMIZED: Get subcategory by slugs
 const getSubcategoryBySlug = async (req, res) => {
   try {
     const { categorySlug, subcategorySlug } = req.params;
-
-    console.log("Looking for subcategory:", { categorySlug, subcategorySlug });
-
-    // First find the parent category
-    let parentCategory = await Category.findOne({ slug: categorySlug });
+    const cacheKey = getCacheKey('subcategory_slug', { categorySlug, subcategorySlug });
+    
+    // Check cache
+    let cachedData = categoryCache.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json({
+        success: true,
+        data: cachedData,
+        cached: true
+      });
+    }
+    
+    // Find parent category
+    let parentCategory = await Category.findOne({ slug: categorySlug, isActive: true })
+      .select('_id name slug')
+      .lean();
+      
     if (!parentCategory) {
       const decodedSlug = decodeURIComponent(categorySlug).replace(/-/g, " ");
       parentCategory = await Category.findOne({
         name: { $regex: new RegExp(`^${decodedSlug}$`, "i") },
-      });
+        isActive: true
+      })
+      .select('_id name slug')
+      .lean();
     }
-
+    
     if (!parentCategory) {
-      console.log("Parent category not found:", categorySlug);
       return res.status(404).json({
         success: false,
         message: "Category not found",
       });
     }
-
-    // Find subcategory by slug that has parent = parentCategory._id
+    
+    // Find subcategory
     let subcategory = await Category.findOne({
       slug: subcategorySlug,
       parent: parentCategory._id,
-    }).populate("parent", "name slug");
-
+      isActive: true
+    })
+    .select('_id name slug description image imageAlt icon level order metaTitle metaDescription')
+    .lean();
+    
     if (!subcategory) {
-      // Try to find by name
-      const decodedSlug = decodeURIComponent(subcategorySlug).replace(
-        /-/g,
-        " ",
-      );
+      const decodedSlug = decodeURIComponent(subcategorySlug).replace(/-/g, " ");
       subcategory = await Category.findOne({
         name: { $regex: new RegExp(`^${decodedSlug}$`, "i") },
         parent: parentCategory._id,
-      }).populate("parent", "name slug");
+        isActive: true
+      })
+      .select('_id name slug description image imageAlt icon level order metaTitle metaDescription')
+      .lean();
     }
-
+    
     if (!subcategory) {
-      console.log("Subcategory not found:", subcategorySlug);
       return res.status(404).json({
         success: false,
         message: "Subcategory not found",
       });
     }
-
-    console.log("Found subcategory:", subcategory.name);
-
+    
     // Get products for this subcategory
     const Product = require("../models/Product");
     const products = await Product.find({
       category: subcategory._id,
       isActive: true,
-    }).select(
-      "_id name price discountPrice originalPrice images mainImage rating inStock stock slug",
-    );
-
+    })
+    .select('_id name price discountPrice originalPrice images mainImage rating inStock stock slug')
+    .lean()
+    .limit(50) // Limit products for performance
+    .maxTimeMS(3000);
+    
+    const result = {
+      ...subcategory,
+      parentCategory: {
+        _id: parentCategory._id,
+        name: parentCategory.name,
+        slug: parentCategory.slug,
+      },
+      products,
+      productsCount: products.length
+    };
+    
+    categoryCache.set(cacheKey, result);
+    res.set('Cache-Control', 'public, max-age=120');
+    
     res.status(200).json({
       success: true,
-      data: {
-        ...subcategory.toObject(),
-        parentCategory: {
-          _id: parentCategory._id,
-          name: parentCategory.name,
-          slug: parentCategory.slug,
-        },
-        products,
-      },
+      data: result,
     });
   } catch (error) {
     console.error("Error in getSubcategoryBySlug:", error);
@@ -257,47 +493,61 @@ const getSubcategoryBySlug = async (req, res) => {
   }
 };
 
-// Get products by category ID (for categories without subcategories)
+// OPTIMIZED: Get products by category
 const getProductsByCategory = async (req, res) => {
   try {
     const { id } = req.params;
-
-    console.log("Getting products for category:", id);
-
-    // Check if category exists
-    const category = await Category.findById(id);
-
+    const cacheKey = getCacheKey('category_products', { id });
+    
+    // Check cache
+    let cachedData = categoryCache.get(cacheKey);
+    if (cachedData) {
+      return res.status(200).json({
+        success: true,
+        ...cachedData,
+        cached: true
+      });
+    }
+    
+    // Get category and products in parallel
+    const [category, products] = await Promise.all([
+      Category.findById(id)
+        .select('_id name slug description image')
+        .lean()
+        .maxTimeMS(3000),
+      require("../models/Product").find({
+        category: id,
+        isActive: true,
+      })
+      .select('_id name price discountPrice originalPrice images mainImage rating inStock stock slug')
+      .lean()
+      .limit(50)
+      .maxTimeMS(3000)
+    ]);
+    
     if (!category) {
       return res.status(404).json({
         success: false,
         message: "Category not found",
       });
     }
-
-    // Import Product model
-    const Product = require("../models/Product");
-
-    // Find products that belong to this category
-    const products = await Product.find({
-      category: id,
-      isActive: true,
-    }).select(
-      "_id name price discountPrice originalPrice images mainImage rating inStock stock slug",
-    );
-
-    console.log(
-      `Found ${products.length} products for category ${category.name}`,
-    );
-
-    res.status(200).json({
-      success: true,
+    
+    const result = {
       count: products.length,
       data: products,
       category: {
         _id: category._id,
         name: category.name,
         slug: category.slug,
-      },
+      }
+    };
+    
+    categoryCache.set(cacheKey, result);
+    res.set('Cache-Control', 'public, max-age=120');
+    
+    res.status(200).json({
+      success: true,
+      ...result,
     });
   } catch (error) {
     console.error("Error in getProductsByCategory:", error);
@@ -308,7 +558,7 @@ const getProductsByCategory = async (req, res) => {
   }
 };
 
-// Create category
+// Create category (no caching)
 const createCategory = async (req, res) => {
   try {
     const {
@@ -324,13 +574,13 @@ const createCategory = async (req, res) => {
       order,
       featured,
     } = req.body;
-
+    
     // Create slug from name
     const slug = name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "");
-
+    
     // Calculate level based on parent
     let level = 0;
     if (parent) {
@@ -339,7 +589,7 @@ const createCategory = async (req, res) => {
         level = parentCategory.level + 1;
       }
     }
-
+    
     // Process Base64 images
     let processedImage = null;
     let processedBannerImage = null;
@@ -353,7 +603,7 @@ const createCategory = async (req, res) => {
         message: error.message,
       });
     }
-
+    
     const category = await Category.create({
       name,
       slug,
@@ -369,7 +619,11 @@ const createCategory = async (req, res) => {
       order: order || 0,
       featured: featured || false,
     });
-
+    
+    // Clear all caches after creating new category
+    categoryCache.flushAll();
+    console.log('🗑️ Cache cleared after category creation');
+    
     res.status(201).json({
       success: true,
       message: "Category created successfully",
@@ -384,7 +638,7 @@ const createCategory = async (req, res) => {
   }
 };
 
-// Update category
+// Update category (clear cache)
 const updateCategory = async (req, res) => {
   try {
     const {
@@ -401,14 +655,14 @@ const updateCategory = async (req, res) => {
       featured,
       isActive,
     } = req.body;
-
+    
     const updateData = {
       description: description || "",
       imageAlt: imageAlt || "",
       metaTitle: metaTitle || "",
       metaDescription: metaDescription || "",
     };
-
+    
     // Process Base64 images if provided
     if (image !== undefined) {
       try {
@@ -420,7 +674,7 @@ const updateCategory = async (req, res) => {
         });
       }
     }
-
+    
     if (bannerImage !== undefined) {
       try {
         updateData.bannerImage = processBase64Image(bannerImage);
@@ -431,11 +685,11 @@ const updateCategory = async (req, res) => {
         });
       }
     }
-
+    
     if (icon !== undefined) {
       updateData.icon = icon || null;
     }
-
+    
     if (name) {
       updateData.name = name;
       updateData.slug = name
@@ -443,7 +697,7 @@ const updateCategory = async (req, res) => {
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "");
     }
-
+    
     if (parent !== undefined) {
       if (parent && parent !== "") {
         const parentCategory = await Category.findById(parent);
@@ -459,24 +713,28 @@ const updateCategory = async (req, res) => {
         updateData.parent = null;
       }
     }
-
+    
     if (order !== undefined) updateData.order = order;
     if (featured !== undefined) updateData.featured = featured;
     if (isActive !== undefined) updateData.isActive = isActive;
-
+    
     const category = await Category.findByIdAndUpdate(
       req.params.id,
       updateData,
-      { new: true, runValidators: true },
+      { new: true, runValidators: true }
     ).populate("parent", "name slug image");
-
+    
     if (!category) {
       return res.status(404).json({
         success: false,
         message: "Category not found",
       });
     }
-
+    
+    // Clear all caches after update
+    categoryCache.flushAll();
+    console.log('🗑️ Cache cleared after category update');
+    
     res.status(200).json({
       success: true,
       message: "Category updated successfully",
@@ -491,27 +749,31 @@ const updateCategory = async (req, res) => {
   }
 };
 
-// Delete category
+// Delete category (clear cache)
 const deleteCategory = async (req, res) => {
   try {
     const hasChildren = await Category.findOne({ parent: req.params.id });
-
+    
     if (hasChildren) {
       return res.status(400).json({
         success: false,
         message: "Cannot delete category with subcategories",
       });
     }
-
+    
     const category = await Category.findByIdAndDelete(req.params.id);
-
+    
     if (!category) {
       return res.status(404).json({
         success: false,
         message: "Category not found",
       });
     }
-
+    
+    // Clear all caches after deletion
+    categoryCache.flushAll();
+    console.log('🗑️ Cache cleared after category deletion');
+    
     res.status(200).json({
       success: true,
       message: "Category deleted successfully",
@@ -524,45 +786,44 @@ const deleteCategory = async (req, res) => {
   }
 };
 
-// Get category tree (all categories with their subcategories)
-const getCategoryTree = async (req, res) => {
+// Clear all cache (admin utility)
+const clearCategoryCache = async (req, res) => {
   try {
-    // Get all top-level categories (parent = null)
-    const topLevelCategories = await Category.find({
-      parent: null,
-      isActive: true,
-    })
-      .select(
-        "_id name slug description image imageAlt icon level order featured",
-      )
-      .sort("order name");
-
-    // For each top-level category, get its subcategories
-    const categoryTree = await Promise.all(
-      topLevelCategories.map(async (category) => {
-        const subcategories = await Category.find({
-          parent: category._id,
-          isActive: true,
-        })
-          .select(
-            "_id name slug description image imageAlt icon level order featured",
-          )
-          .sort("order name");
-        return {
-          ...category.toObject(),
-          subcategories,
-        };
-      }),
-    );
-
+    categoryCache.flushAll();
+    console.log('🗑️ Category cache cleared manually');
     res.status(200).json({
       success: true,
-      data: categoryTree,
+      message: 'Category cache cleared successfully'
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: error.message
+    });
+  }
+};
+
+// Get cache stats (admin utility)
+const getCacheStats = async (req, res) => {
+  try {
+    const stats = categoryCache.getStats();
+    const keys = categoryCache.keys();
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        hits: stats.hits,
+        misses: stats.misses,
+        keys: keys.length,
+        keysList: keys,
+        ksize: stats.ksize,
+        vsize: stats.vsize
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
     });
   }
 };
@@ -578,4 +839,6 @@ module.exports = {
   updateCategory,
   deleteCategory,
   getCategoryTree,
+  clearCategoryCache,
+  getCacheStats,
 };

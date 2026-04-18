@@ -24,8 +24,10 @@
     "mongodb": "3.6",
     "mongoose": "^9.4.1",
     "morgan": "^1.10.1",
+    "node-cache": "^5.1.2",
     "nodemailer": "^8.0.2",
-    "pdfkit": "^0.18.0"
+    "pdfkit": "^0.18.0",
+    "redis": "^5.12.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
